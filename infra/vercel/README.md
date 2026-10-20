@@ -49,7 +49,14 @@ source snapshot it ran.
    * builds the web app with them (`npm run build:vercel`).
 2. The runner snapshot and the named sandbox `kairo-runner` must exist in the
    project (see below). They are not part of a deployment.
-3. Every push to `main` deploys to production; other branches get preview
+3. Turn on AI Gateway credit for Saarthi's AI answers: Vercel dashboard →
+   **AI Gateway** → **Use Free AI Gateway Credit** (the card is verified, not
+   charged). The free credit gives $5 every 30 days for a limited set of
+   models; the default model, `google/gemini-2.5-flash-lite`, is one of them.
+   Without credit AI Gateway refuses Saarthi's requests: students see "Saarthi's
+   AI service (Vercel AI Gateway) refused the request", the function log shows
+   the gateway's reason, and the quick notes, fixes and runs keep working.
+4. Every push to `main` deploys to production; other branches get preview
    deployments.
 
 No environment variable is required. Optional ones (Project → Settings →
@@ -59,7 +66,7 @@ Environment Variables, then redeploy):
 |---|---|---|
 | `CC_EVIDENCE_SECRET` | a key generated at build time | A fixed key for signing run evidence and fix tokens (they then stay valid across deployments). Mark it *Sensitive*. |
 | `CRON_SECRET` | none | Vercel sends it with the cron request. Without it, anyone may call the keep-alive, which then does its work at most once every 10 minutes per instance. Mark it *Sensitive*. |
-| `CC_AI_MODEL` | `google/gemini-3.5-flash-lite` | Any model id from AI Gateway's model list. |
+| `CC_AI_MODEL` | `google/gemini-2.5-flash-lite` (covered by the free credit) | Any model id from AI Gateway's model list. A model page's *Free AI Gateway Credit* column says whether the free credit covers it; newer models such as `google/gemini-3.5-flash-lite` need paid credit. |
 | `VITE_AUTH_PROVIDERS` | email and password only | Extra sign-in buttons: `google`, `github`, `azure`, `phone` (set them up in Supabase first, see [docs/accounts.md](../../docs/accounts.md)). |
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | `public-settings.json` | Another Supabase project. |
 | `CC_VERCEL_SANDBOX_NAME` | `kairo-runner` | Another named sandbox. |

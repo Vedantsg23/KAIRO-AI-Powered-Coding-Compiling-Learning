@@ -1039,7 +1039,7 @@ format messy code; open the **notebook** from the left bar and press **Shift+Ent
 | `WEB_BIND` | `127.0.0.1` | Interface to listen on. `0.0.0.0` only on a trusted network |
 | `CC_AI_PROVIDER` | `anthropic` (`gateway` on Vercel) | `anthropic`, `openai` (any OpenAI-compatible server), `gateway` (Vercel AI Gateway) or `none` |
 | `ANTHROPIC_API_KEY` | empty | Key for Claude. Without it Saarthi is off and everything else works |
-| `CC_AI_MODEL` | `claude-haiku-4-5-20251001` | Model id |
+| `CC_AI_MODEL` | `claude-haiku-4-5-20251001` (`google/gemini-2.5-flash-lite` with `gateway`) | Model id |
 | `CC_AI_BASE_URL` | empty | For `openai`: e.g. `http://127.0.0.1:11434/v1` (Ollama) |
 | `CC_AI_API_KEY` or `OPENAI_API_KEY` | empty | For `openai` servers that need a key (Ollama does not) |
 | `CC_AI_REQUESTS_PER_MINUTE` / `_PER_DAY` | `10` / `150` | Saarthi limits per client (IP address) |
@@ -1114,6 +1114,14 @@ Dockerfile, and tries Swift in a separate job that may fail.
 > real model (only the labelled stand-in was used), accounts with a real Supabase project (Google, GitHub,
 > Microsoft, phone codes, email, password reset), and browsers other than headless Chromium. Details in the
 > [milestone report](docs/milestones/M3-M6-report.md#8-not-verified-stated-plainly).
+
+> [!NOTE]
+> **Checked on the live site** (`https://kairo-ai-phi.vercel.app`, 20 October 2026, Chromium 152 on Windows): the
+> Vercel build from `main`; a C program compiled and run in the Vercel Sandbox (83 ms); the live analyzer and compile
+> errors pinned to their lines; "results outdated" after an edit; the health, Saarthi status and keep-alive endpoints
+> (Supabase and the runner VM answered); the long-cached built files and the service worker. **Not yet:** Saarthi's
+> AI answers (AI Gateway refused them because the team had no AI Gateway credit turned on; see
+> [infra/vercel/README.md](infra/vercel/README.md#deploying)), creating an account, and installing the app.
 
 <p align="right"><a href="#readme-top">back to top</a></p>
 

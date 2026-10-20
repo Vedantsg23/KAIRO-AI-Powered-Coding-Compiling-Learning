@@ -111,7 +111,7 @@ Set on the API process (never in the browser; `.env` is not committed):
 |---|---|---|
 | `CC_AI_PROVIDER` | `gateway` on Vercel, otherwise `anthropic` | `anthropic`, `openai` (any OpenAI-compatible server), `gateway` (Vercel AI Gateway) or `none` |
 | `ANTHROPIC_API_KEY` | empty | Key for Claude. Without it Saarthi is off. |
-| `CC_AI_MODEL` | `claude-haiku-4-5-20251001`; `google/gemini-3.5-flash-lite` with `gateway` | Model id, e.g. `claude-sonnet-5` for deeper answers |
+| `CC_AI_MODEL` | `claude-haiku-4-5-20251001`; `google/gemini-2.5-flash-lite` with `gateway` | Model id, e.g. `claude-sonnet-5` for deeper answers |
 | `CC_AI_BASE_URL` | empty | For `openai`: e.g. `http://127.0.0.1:11434/v1` (Ollama) |
 | `CC_AI_API_KEY` or `OPENAI_API_KEY` | empty | For `openai` servers that need a key (Ollama does not) |
 | `CC_AI_TIMEOUT_S` | 45 | Per request |
@@ -132,11 +132,19 @@ provider and model, and the limits; it never returns a key.
 
 On Vercel the API uses `gateway` by default and signs in with the
 deployment's own OIDC token (Vercel adds it to every request), so **no AI key
-is stored anywhere**: enable AI Gateway for the team in the Vercel dashboard
-(the free monthly credit is enough for a class), redeploy, and Saarthi is on.
-To choose another model, set `CC_AI_MODEL` to any model id from the Gateway's
-model list (for example `anthropic/claude-haiku-4.5`). Outside Vercel the
-gateway can be used with `AI_GATEWAY_API_KEY`.
+is stored anywhere**: turn on AI Gateway credit for the team in the Vercel
+dashboard (**AI Gateway → Use Free AI Gateway Credit**; the card is verified,
+not charged) and Saarthi is on. The free credit, $5 every 30 days, is enough
+for a class but covers only a limited set of models; the default,
+`google/gemini-2.5-flash-lite`, is one of them. To choose another model, set
+`CC_AI_MODEL` to any model id from the Gateway's model list; a model's page
+shows in its *Free AI Gateway Credit* column whether the free credit covers it
+(newer models such as `google/gemini-3.5-flash-lite` need paid credit). When
+the gateway refuses a request (no credit, or a model the credit does not
+cover), students see "Saarthi's AI service (Vercel AI Gateway) refused the
+request" and the function log shows the gateway's reason; the quick notes,
+fixes and runs keep working. Outside Vercel the gateway can be used with
+`AI_GATEWAY_API_KEY`.
 
 ### Claude
 

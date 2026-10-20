@@ -43,9 +43,17 @@ OPENAI_URL = "https://api.openai.com/v1"
 # CC_AI_MODEL=claude-sonnet-5.
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 GATEWAY_URL = "https://ai-gateway.vercel.sh/v1"
-# Gemini 3.5 Flash Lite: fast (about 0.5 s to the first token) and inexpensive
-# (AI Gateway model page, October 2026). Override with CC_AI_MODEL.
-DEFAULT_GATEWAY_MODEL = "google/gemini-3.5-flash-lite"
+# Gemini 2.5 Flash Lite: fast and inexpensive, and one of the models that AI
+# Gateway's free credit covers ($5 every 30 days for a limited set of models;
+# the model's AI Gateway page, October 2026), so Saarthi works on a free Vercel
+# account. Newer models such as google/gemini-3.5-flash-lite need paid AI
+# Gateway credit; choose one with CC_AI_MODEL.
+DEFAULT_GATEWAY_MODEL = "google/gemini-2.5-flash-lite"
+# What students see when AI Gateway refuses the deployment (HTTP 401/403): the
+# team has no AI Gateway credit turned on, or the free credit does not cover
+# the model. The gateway's own reason goes to the server log.
+GATEWAY_REFUSED = ("Saarthi's AI service (Vercel AI Gateway) refused the request. The site owner can turn on "
+                   "AI Gateway credit or choose another model in Vercel. The quick notes and fixes still work.")
 
 
 class ProviderError(Exception):
@@ -135,15 +143,49 @@ def with_model(provider: Provider | None, model: str) -> Provider | None:
     return provider
 
 
+# Anything in a provider's error text that looks like a key or token (a JWT such
+# as the OIDC token, or an sk-/vck- style key) is removed before it is logged.
+_SECRET_LIKE = re.compile(r"eyJ[\w-]{8,}\.[\w-]+\.[\w-]*|\b(?:sk|vck|key)[-_][\w-]{8,}", re.IGNORECASE)
+
+
+def _error_reason(response: httpx.Response) -> str:
+    """The provider's own short reason for a refusal, for the server log only.
+
+    Students never see it (they get the fixed messages below); it is one line,
+    at most 240 characters, with anything that looks like a key removed.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, dict):
+        parts = [str(error[k]) for k in ("type", "code", "message") if error.get(k)]
+    elif isinstance(error, str):
+        parts = [error]
+    elif isinstance(payload, dict) and isinstance(payload.get("message"), str):
+        parts = [payload["message"]]
+    else:
+        parts = []
+    text = _SECRET_LIKE.sub("[redacted]", " ".join(" | ".join(parts).split()))
+    return text[:240]
+
+
 def _raise_for_status(response: httpx.Response, provider: str) -> None:
     status = response.status_code
     if status < 400:
         return
     retry = response.headers.get("retry-after")
     retry_s = int(float(retry)) if retry and re.fullmatch(r"\d+(?:\.\d+)?", retry) else None
-    log.warning("%s answered HTTP %s", provider, status)
+    reason = _error_reason(response)
+    log.warning("%s answered HTTP %s%s", provider, status, f": {reason}" if reason else "")
     if status in (401, 403):
+        if provider == "gateway":
+            raise ProviderError(GATEWAY_REFUSED)
         raise ProviderError("The AI provider rejected the server's API key. Ask your administrator to check it.")
+    if status == 402:
+        raise ProviderError("The AI service has no credit left for this site. Ask the site owner to check it. "
+                            "The quick notes and fixes still work.")
     if status == 404:
         raise ProviderError("The AI provider does not know the configured model (check CC_AI_MODEL).")
     if status == 429:

@@ -168,9 +168,10 @@ def test_a_fix_proposed_on_one_instance_is_verified_on_another(make_client):
 class FakeGateway:
     """An OpenAI-compatible server that streams its answer as server-sent events."""
 
-    def __init__(self, pieces: list[str] | None = None, status: int = 200) -> None:
+    def __init__(self, pieces: list[str] | None = None, status: int = 200, error: dict | None = None) -> None:
         self.pieces = pieces or ["Line 3 ", "needs a ", "semicolon."]
         self.status = status
+        self.error = error or {"error": "nope"}
         self.requests: list[dict] = []
         self.headers: list[httpx.Headers] = []
 
@@ -180,7 +181,7 @@ class FakeGateway:
         self.requests.append(body)
         self.headers.append(request.headers)
         if self.status != 200:
-            return httpx.Response(self.status, json={"error": "nope"})
+            return httpx.Response(self.status, json=self.error)
         assert body["stream"] is True
         events = "".join(f"data: {json.dumps({'choices': [{'delta': {'content': p}}]})}\n\n" for p in self.pieces)
         return httpx.Response(200, content=(events + "data: [DONE]\n\n").encode(),
@@ -237,6 +238,24 @@ def test_chat_problems_before_the_answer_are_http_errors_and_after_it_are_events
     events = ask_streamed(failing, {"question": "What is a loop?"})
     assert events[0]["type"] == "start" and events[-1]["type"] == "error"
     assert "overloaded" in events[-1]["detail"] and "nope" not in json.dumps(events)
+
+
+def test_a_refusal_by_ai_gateway_says_what_to_check_and_logs_the_gateways_reason(make_client, caplog):
+    # What AI Gateway answers when the team's credit does not cover the model.
+    token = fake_jwt()
+    refusal = {"error": {"type": "forbidden", "message": f"Free credit does not cover this model ({token})"}}
+    client = gateway_app(make_client, FakeGateway(status=403, error=refusal))
+    with caplog.at_level("WARNING", logger="saarthi"):
+        events = ask_streamed(client, {"question": "What is a loop?"})
+    assert events[-1]["type"] == "error"
+    assert "AI Gateway" in events[-1]["detail"] and "credit" in events[-1]["detail"]
+    assert "Free credit does not cover" not in json.dumps(events)  # the gateway's text stays on the server
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "gateway answered HTTP 403: forbidden | Free credit does not cover this model" in logged
+    assert token not in logged and "[redacted]" in logged
+
+    spent = gateway_app(make_client, FakeGateway(status=402, error={"error": {"type": "insufficient_funds"}}))
+    assert "no credit left" in ask_streamed(spent, {"question": "What is an array?"})[-1]["detail"]
 
 
 def test_rate_limits_count_the_visitor_address_behind_vercels_proxy(make_client):
