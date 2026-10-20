@@ -7,8 +7,7 @@
  * sandbox: the code goes to the server like a run, to an unlisted formatter
  * profile whose only step prints the file formatted (the code is never run).
  */
-import { api, ApiError, watchExecution } from "../api/client";
-import type { Execution } from "../api/types";
+import { api, ApiError } from "../api/client";
 
 export const PRETTIER_LANGUAGES: Record<string, string> = {
   javascript: "babel",
@@ -76,17 +75,10 @@ async function prettier(languageId: string, source: string): Promise<FormatResul
   }
 }
 
-function finished(id: string): Promise<Execution> {
-  return new Promise((resolve) => {
-    watchExecution(id, (execution) => execution.terminal && resolve(execution));
-  });
-}
-
 async function sandbox(languageId: string, source: string): Promise<FormatResult> {
   const { profile, tool } = SANDBOX_FORMATTERS[languageId];
   try {
-    const created = await api.createExecution({ languageId: profile, source, stdin: "" });
-    const done = created.terminal ? created : await finished(created.id);
+    const done = await api.runStream({ languageId: profile, source, stdin: "" });
     const step = done.steps[0];
     if (done.state === "SUCCEEDED" && step && !step.stdoutTruncated && step.stdout.trim()) return { ok: true, text: step.stdout, tool };
     const problem = done.diagnostics.find((d) => d.severity === "error" && !d.code.startsWith("RUNTIME_"));

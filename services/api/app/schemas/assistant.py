@@ -10,6 +10,9 @@ from .common import ApiModel
 
 Confidence = Literal["low", "medium", "high"]
 SOURCE_HASH = r"^sha256:[0-9a-f]{64}$"
+EVIDENCE_MAX = 3_000_000
+EVIDENCE_HELP = ("The run's sealed evidence from its final snapshot; lets any server instance answer "
+                 "about a run it did not execute. The server checks the seal.")
 
 
 class AssistantStatusOut(ApiModel):
@@ -28,6 +31,7 @@ class ExplainIn(ApiModel):
     diagnostic_id: str | None = Field(default=None, max_length=128,
                                       description="Diagnostic to explain; default: the first error.")
     question: str | None = Field(default=None, max_length=500)
+    evidence: str | None = Field(default=None, max_length=EVIDENCE_MAX, description=EVIDENCE_HELP)
 
 
 class CodeLocationOut(ApiModel):
@@ -56,6 +60,7 @@ class FixIn(ApiModel):
     execution_id: str = Field(max_length=64)
     source_hash: str = Field(pattern=SOURCE_HASH)
     diagnostic_id: str | None = Field(default=None, max_length=128)
+    evidence: str | None = Field(default=None, max_length=EVIDENCE_MAX, description=EVIDENCE_HELP)
 
 
 class PatchEditOut(ApiModel):
@@ -78,11 +83,14 @@ class FixOut(ApiModel):
     provider: str
     model: str
     cached: bool = False
+    fix_token: str | None = Field(default=None, description="The sealed proposal; send it back to /verify.")
 
 
 class VerifyIn(ApiModel):
     fix_id: str = Field(max_length=64)
     execution_id: str = Field(max_length=64, description="The run of the patched code.")
+    fix_token: str | None = Field(default=None, max_length=8_000, description="FixOut.fixToken of the proposal.")
+    evidence: str | None = Field(default=None, max_length=EVIDENCE_MAX, description=EVIDENCE_HELP)
 
 
 class VerifyOut(ApiModel):
@@ -111,6 +119,9 @@ class AskIn(ApiModel):
     source: str | None = Field(default=None, max_length=64 * 1024,
                                description="The editor's code when there is no run to ground the answer in.")
     history: list[ChatTurnIn] = Field(default_factory=list, max_length=8)
+    evidence: str | None = Field(default=None, max_length=EVIDENCE_MAX, description=EVIDENCE_HELP)
+    diagnostic_id: str | None = Field(default=None, max_length=128,
+                                      description="With executionId: the diagnostic the question is about.")
 
 
 class AskOut(ApiModel):

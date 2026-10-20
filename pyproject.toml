@@ -1,0 +1,28 @@
+# The Vercel deployment of KAIRO (see vercel.json and infra/vercel/README.md).
+#
+# Vercel installs these dependencies and runs services/api/app/main.py as one
+# Python function: the FastAPI app serves /api/v1/... and the built web app.
+# Local development does not use this file: `make setup` installs
+# services/api and services/runner (see README).
+
+[project]
+name = "kairo"
+version = "0.1.0"
+description = "KAIRO: AI-powered coding, compiling and learning (Vercel deployment)"
+requires-python = ">=3.12"
+# The API's runtime dependencies, as in services/api/pyproject.toml.
+dependencies = [
+  "fastapi>=0.141,<0.142",
+  "starlette>=1.7,<1.8",
+  "pydantic>=2.13,<2.14",
+  "pydantic-settings>=2.15,<2.16",
+  "httpx>=0.28,<0.29",
+]
+
+[tool.vercel]
+entrypoint = "services.api.app.main:app"
+
+# The built web app (apps/web/dist, see vercel.json) is served from Vercel's CDN;
+# the function keeps only its index.html.
+[tool.vercel.fastapi.static]
+exclude = true

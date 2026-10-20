@@ -6,6 +6,11 @@ runner starts one hardened container per step (compile, run) from a sandbox
 image per toolchain. Saarthi, the AI guide, lives inside the API and talks to
 an AI provider only when a student asks.
 
+The live site runs the same API on Vercel without Docker: the API is a Python
+function, and jobs go to a Vercel Sandbox micro-VM whose executor gives each
+step the same isolation with namespaces and cgroups; accounts and their saved
+work live in Supabase. See [infra/vercel/README.md](../infra/vercel/README.md).
+
 ## 1. Components
 
 ```mermaid
@@ -32,7 +37,7 @@ flowchart LR
     AI(["AI provider<br/>Claude API, or an<br/>OpenAI-compatible server"])
 
     UI <-- "text, problems (no network)" --> W
-    UI -- "POST /executions, GET, WS events" --> R
+    UI -- "POST /executions/run (streamed), GET, WS events" --> R
     UI -- "/assistant/* (on request only)" --> R
     R --> S
     R --> A
@@ -234,8 +239,9 @@ never asked whether its own fix worked.
 | Declarative TOML profiles, grammars in separate files | "Add a language by configuration"; regexes in TOML literal strings need no escaping; profiles share grammars where tools share formats (C# and TypeScript compilers, the Node.js runtime for JavaScript and TypeScript, the JVM runtime for Java and Kotlin) | A language needs logic that rules and block parsers cannot express |
 | A check step for interpreted languages | Syntax errors become compile errors with a line, and the program never starts | — |
 | Runner behind internal HTTP + NDJSON, not Redis | One lab machine; fewer moving parts; progress events for free | Several runner machines are needed |
-| In-memory execution store | No accounts or projects yet | Persistence (planned with Supabase/Postgres) |
-| WebSocket sends full snapshots | Simple client logic; no lost-update bugs | Output streaming (large payloads) |
+| In-memory execution store, with signed evidence handed to the browser | A run lives for minutes; on serverless hosts the browser carries the run's signed evidence (HMAC) back to Saarthi, so any instance can answer and nothing is stored | Run history is needed on the server |
+| Every update is the full snapshot (streamed NDJSON, or WebSocket) | Simple client logic; no lost-update bugs; the stream works on serverless hosts without WebSockets | Output streaming (large payloads) |
+| Accounts and saved work between the browser and Supabase (RLS), not through the API | The API stays stateless and never sees account data; Row Level Security limits each account to its own rows | Per-account limits or sharing are needed in the API |
 | Monaco and Tree-sitter bundled locally, lazy-loaded | Works offline in a lab; first paint does not wait for them | — |
 | Editor owns its text while typing | The web app replaces the editor's text only for deliberate changes (examples, fixes, language switch); comparing values on every render lost keystrokes during fast typing | — |
 | Language availability from the runner | A language whose image is not built is hidden instead of failing at Run (and the API answers 409) | — |
@@ -247,11 +253,10 @@ never asked whether its own fix worked.
 
 * Single-file programs only (one `main.<ext>`; Java's `Main.java`), no
   third-party packages, no network inside programs.
-* One API process with in-memory state: restarting it forgets executions and
-  Saarthi's pending fixes.
-* No accounts: an execution id (96 random bits) is the only thing needed to
-  read a result, and rate limits are per IP address. Keep the API on a
-  trusted network until accounts exist.
+* In-memory execution state: restarting the API forgets executions (on
+  Vercel, the browser still holds the signed evidence of its last run).
+* The API does not check accounts: an execution id (96 random bits) is the
+  only thing needed to read a result, and rate limits are per IP address.
 * Runtime crashes that print nothing (a segmentation fault in C) have no
   source line; sanitizer builds as an opt-in "debug run" are an option.
 * The runner needs a Linux Docker daemon: on Windows use Docker Desktop with

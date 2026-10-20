@@ -45,6 +45,25 @@ Request:
 | `422` | Unknown language or malformed body. |
 | `503` | The queue is full. `Retry-After` header and `retryAfterS` in the body say when to try again. |
 
+### `POST /api/v1/executions/run`
+The same request as `POST /executions`, answered with a stream instead of a
+single snapshot: `200` with `Content-Type: application/x-ndjson`, one full
+execution snapshot (the JSON of `GET /executions/{id}`) per line whenever the
+run changes, ending with the terminal snapshot. A blank line is sent every 10 s
+while nothing changes, so proxies keep a quiet stream open. Refusals (`409`,
+`413`, `422`, `503`) are ordinary responses before the stream starts.
+
+This is what the web app uses for every run, the notebook and sandbox
+formatting: it needs no WebSocket and no second request, so it also works on
+serverless hosts such as Vercel, where the next request may reach another
+instance.
+
+The terminal snapshot carries `evidence`: the run (source snapshot,
+diagnostics, output) signed by the API (HMAC). The browser hands it back to
+Saarthi with *explain*, *fix* and *ask*, so any instance can answer about the
+run; a changed or foreign token is refused. It is not encrypted: it holds only
+what the browser already has.
+
 ### `GET /api/v1/executions/{id}`
 The current snapshot. `404` if unknown or evicted. A real response for a
 missing semicolon (stderr shortened):
@@ -107,14 +126,26 @@ after every change, then closes with code `1000` after the terminal snapshot.
 Unknown ids close with code `4404`. Clients should fall back to polling `GET`
 if the socket cannot be opened (the web app does).
 
-There are no server-side accounts yet (guest profiles live in the browser; see
+The API does not see accounts (guest profiles live in the browser, accounts
+and their saved work between the browser and Supabase; see
 [accounts.md](accounts.md)): the random execution id is the only credential
 needed to read a result. No long-lived secret is ever placed in the WebSocket
 URL.
 
 ### `GET /api/v1/health`
 `{"status": "ok"|"degraded", "api": "ok", "runner": {...}, "queue": {"depth", "capacity", "workers"}}`.
-The web app uses it for the status-bar indicator.
+The web app uses it for the status-bar indicator. On Vercel `runner` reads
+`{"status", "backend": "vercel-sandbox", "images"}` without starting the
+runner VM.
+
+### `GET /api/v1/system/keepalive`
+Called once a day by Vercel Cron (`vercel.json`): calls the Supabase function
+`keepalive()` so the free project is never paused, and wakes the runner VM so
+its snapshot does not expire. Returns
+`{"database": {"status": "ok"|"skipped"|"error", ...}, "runner": {"status", ...}}`.
+With `CRON_SECRET` set it requires `Authorization: Bearer <CRON_SECRET>`
+(`401` otherwise); without it anyone may call it, and it does its work at most
+once every 10 minutes per instance.
 
 ## The diagnostic format
 
@@ -185,14 +216,15 @@ AI provider (rate-limited per client); verify never does. Errors use the same
 | Endpoint | Request | Response |
 |---|---|---|
 | `GET /status` | — | `{enabled, provider, model, reason, requestsPerMinute, requestsPerDay}` (never a key) |
-| `POST /explain` | `{executionId, sourceHash, diagnosticId?, question?}` | `{problem, whatHappened, why, location: {line} \| null, suggestedFix, relatedConcepts[], confidence, diagnosticIds[], focusDiagnosticId, sourceHash, verified: false, provider, model, cached}` |
-| `POST /fix` | `{executionId, sourceHash, diagnosticId?}` | `{fixId, baseSourceHash, patchedSource, patchedSourceHash, summary, edits: [{startLine, endLine, replacement}], targetCodes[], confidence, verified: false, ...}` |
-| `POST /verify` | `{fixId, executionId}` (the run of the patched code) | `{verdict: "fixed" \| "improved" \| "not_fixed" \| "different_code", verified, message, beforeState, afterState, beforeErrors, afterErrors}` |
-| `POST /ask` | `{question, languageId?, executionId? + sourceHash? \| source?, history[] (up to 8 turns)}` | `{answer, groundedOn: "execution" \| "source" \| "none", ...}` |
+| `POST /explain` | `{executionId, sourceHash, diagnosticId?, question?, evidence?}` | `{problem, whatHappened, why, location: {line} \| null, suggestedFix, relatedConcepts[], confidence, diagnosticIds[], focusDiagnosticId, sourceHash, verified: false, provider, model, cached}` |
+| `POST /fix` | `{executionId, sourceHash, diagnosticId?, evidence?}` | `{fixId, fixToken, baseSourceHash, patchedSource, patchedSourceHash, summary, edits: [{startLine, endLine, replacement}], targetCodes[], confidence, verified: false, ...}` |
+| `POST /verify` | `{fixId, executionId, fixToken?, evidence?}` (the run of the patched code) | `{verdict: "fixed" \| "improved" \| "not_fixed" \| "different_code", verified, message, beforeState, afterState, beforeErrors, afterErrors}` |
+| `POST /ask` | `{question, languageId?, executionId? + sourceHash? \| source?, diagnosticId?, evidence?, history[] (up to 8 turns)}` | `{answer, groundedOn: "execution" \| "source" \| "none", ...}` |
+| `POST /ask/stream` | the same as `/ask` | `application/x-ndjson`: `start`, then `delta` events with the next piece of text, then `done` (or `error`); see [saarthi.md](saarthi.md#streaming-answers) |
 
 | Status | Meaning |
 |---|---|
-| `404` | Unknown or expired run, diagnostic or fix |
+| `404` | Unknown or expired run, diagnostic or fix, or evidence / a fix token that does not check out |
 | `409` | The code changed since the run (`sourceHash` differs), or the run has not finished |
 | `422` | Nothing to explain or fix (a clean run), or no small safe fix exists |
 | `429` | A rate limit or the daily budget was reached (`Retry-After`) |

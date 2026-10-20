@@ -1,0 +1,54 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "fastapi",
+  "regions": [
+    "bom1"
+  ],
+  "buildCommand": "node infra/vercel/build-keys.mjs && cd apps/web && npm ci --no-audit --no-fund && npm run build:vercel",
+  "build": {
+    "env": {
+      "VERCEL_FASTAPI_STATIC_CDN": "1"
+    }
+  },
+  "functions": {
+    "services/api/app/main.py": {
+      "maxDuration": 300,
+      "includeFiles": "{infra/vercel/runner/kairo_exec.py,services/api/app/adapters/profiles/**,services/api/app/adapters/grammars/**,services/api/app/_build/**,apps/web/.env.vercel}",
+      "excludeFiles": "{docs/**,scripts/**,tests/**,packages/**,infra/containers/**,services/runner/**,services/api/tests/**,apps/web/src/**,apps/web/e2e/**,apps/web/scripts/**,infra/vercel/*.mjs,**/*.md,compose.yaml,Makefile}"
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/v1/system/keepalive",
+      "schedule": "17 3 * * *"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    }
+  ]
+}

@@ -57,5 +57,11 @@ export function useMotion(): [boolean, () => void] {
   const systemReduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   const [motion, setMotion] = useState<boolean>(() => load("cd.motion", !systemReduced));
   useEffect(() => void save("cd.motion", motion), [motion]);
+  // An account's saved settings were just loaded (cloud/sync.ts): take its choice.
+  useEffect(() => {
+    const onSettings = () => setMotion(load("cd.motion", !systemReduced));
+    window.addEventListener("kairo:settings", onSettings);
+    return () => window.removeEventListener("kairo:settings", onSettings);
+  }, [systemReduced]);
   return [motion, () => setMotion((m) => !m)];
 }

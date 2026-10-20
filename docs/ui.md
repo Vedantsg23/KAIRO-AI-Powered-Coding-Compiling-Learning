@@ -66,7 +66,11 @@ a code chevron (`|<`) and a green cursor. The wordmark draws KAIRO with the
   (the READY count comes from the API), the diagnostic notes, the sandbox
   (Docker via the runner), Saarthi's provider, the analyzer (WebAssembly and
   workers), the language adapters. Any key or click skips it; it never waits
-  more than 4.5 s; with motion off it shows the results at once.
+  more than 4.5 s; with motion off it shows the results at once. With motion
+  on, a field of stars gathers into the KAIRO mark above the checks
+  (`fx/AstraField.tsx`, one canvas; the card is drawn in the dark palette over
+  the night sky in either theme), and the boot stays up at least 2.1 s so the
+  mark can form.
 * **Entry page** (`auth/LoginPage.tsx`, `auth/HeroStage.tsx`,
   `auth/PipelineTour.tsx`, `auth/Playground.tsx`): the headline, Saarthi
   floating over its holo-platform with three cards (a live diagnostic, a
@@ -98,22 +102,25 @@ a code chevron (`|<`) and a green cursor. The wordmark draws KAIRO with the
   Scroll, bracket colours, whitespace, three editor themes, Saarthi
   Autocomplete, Live Preview and Notebooks. Nothing is downloaded from a
   marketplace: they ship with KAIRO and are loaded the first time they are used.
-* **Console** (`App.tsx`):
+* **Workspace** (`App.tsx`, laid out by `layout/Workbench.tsx` like VS Code
+  or Antigravity):
 
   | Area | What it shows |
   |---|---|
-  | System bar | KAIRO / COMPILER OS, the language runtime, BUILD and SAARTHI status, COMMANDS (Ctrl+K), examples, tour, keys, theme, panel toggles, RUN, profile |
-  | 01 Explorer | drafts as files (one per language), `stdin.txt`, the language's examples (load, or load and run), SYSTEM status |
-  | 02 Editor | Monaco with the KAIRO themes, minimap, folding, bracket matching, autocomplete, gutter glyphs for problems; the analyzer strip (live check, concept at the cursor, whether results are current); Saarthi floating in the corner |
-  | 03 Terminal | the build pipeline (queue, compile or check, link, run, result) over TERMINAL, INPUT, BUILD LOG and DETAILS |
-  | 04 Diagnostics | live syntax problems with their quick fixes, then the run's numbered errors, warnings and crashes; a location jumps to the line |
-  | 05 Saarthi | the fix loop (CODE → ANALYZE → DIAGNOSE → EXPLAIN → FIX → COMPILE → VERIFY), the current concept, the live analysis (ERROR / WHY / CONCEPT / QUICK FIX / CONFIDENCE), the run analysis, AI explanations and fixes, questions |
-  | Status strip | compiler core, sandbox, Saarthi, languages ready, queue, toolchain, cursor, draft saved |
+  | Top bar | KAIRO / COMPILER OS, the language runtime, BUILD and SAARTHI status, COMMANDS (Ctrl+K), examples, tour, keys, theme, the **Layout** buttons (show or hide the explorer, the terminal and Saarthi's panel, each labelled in words), **Install app** where the browser offers it, RUN, profile |
+  | Activity bar and side bar (left) | the explorer (drafts as files, one per language; `stdin.txt`; the language's examples; SYSTEM status) or Extensions. Ctrl+B shows or hides it |
+  | Editor | Monaco with the KAIRO themes, minimap, folding, bracket matching, autocomplete, gutter glyphs for problems; the analyzer strip (live check, concept at the cursor, whether results are current); Saarthi floating in the corner |
+  | Panel (bottom) | the terminal (the build pipeline over TERMINAL, INPUT, BUILD LOG and DETAILS) and, beside it, **Problems** (live syntax problems with quick fixes, then the run's errors, warnings and crashes; a location jumps to the line). Ctrl+\` or Ctrl+J shows or hides it, its maximize button gives it the whole height (restore brings the editor back), and Run opens it |
+  | Saarthi (right) | the chat: answers stream in word by word with a caret, three dots while Saarthi starts, suggestions ("Explain this error", "Give me a hint"), Stop, New chat, a copy button on each answer; plus the fix loop, the current concept, the live analysis and the AI explanations and fixes. Ctrl+Alt+B shows or hides it, Ctrl+Alt+I jumps to the question box |
+  | Status bar | compiler core, sandbox, Saarthi, languages ready, queue, toolchain, cursor, draft saved, and for accounts **Synced**, **Syncing** or **Offline** |
 
-  Panels resize (drag or arrow keys on a divider; remembered per browser).
-  The explorer and Saarthi's panel can be hidden. Below 1024 px the console
-  stacks: the editor, then one tabbed panel (Diagnostics, Saarthi,
-  Terminal, Input, Build log, Details).
+  Every divider works like VS Code's: drag it, or focus it and use the arrow
+  keys (Home and End for the smallest and largest size, Enter or a
+  double-click for the default); dragging the side bar, the panel or
+  Saarthi's panel below about half its smallest size hides it. The layout is
+  remembered per browser and, for accounts, saved with the account. Below
+  1024 px the workspace stacks: the editor, then one tabbed panel
+  (Diagnostics, Saarthi, Terminal, Input, Build log, Details).
 
 ## The interaction layer
 
@@ -132,7 +139,9 @@ keyboard. The components are in `src/fx`, the styles in
 | Entry page | Numbers that count up, sections that slide in, a scroll progress line under the navigation | `Counter`, `Reveal`, `useScrollProgress` |
 | Entry page | The pipeline tour: the panel stays pinned while CODE → ANALYZE → DIAGNOSE → EXPLAIN → FIX → COMPILE → VERIFY take turns, with Saarthi in the middle as the guide (a face and a line for each step: waving, thinking, concerned, explaining, suggesting, happy); the track fills with the scroll; a node jumps to its step | `auth/PipelineTour.tsx` (a plain list of the seven steps, with Saarthi's lines, when motion is off) |
 | Entry page | The playground: three programs with one slip each, checked by the real live analyzer, with the same quick fix | `auth/Playground.tsx`; the analyzer loads only when it scrolls into view |
-| Entry → console | Two green panels sweep across, the KAIRO mark pulses, then part to reveal the console; the panels rise in one after another | `fx/Curtain.tsx`, `.k-in` |
+| Boot | Stars drift in from everywhere and settle into the KAIRO mark (the K and its cursor), which then twinkles over a slowly turning nebula | `fx/AstraField.tsx` (`gather`): one canvas, additive blending, paused while the tab is hidden; motion off draws the finished picture once |
+| Entry → console | A short flight through the stars: every star rushes outwards and stretches into a streak while "Launching workspace" grows and fades, then the console's panels rise in one after another | `StarFlight` in `fx/Curtain.tsx` (`AstraField` in `flight` mode), `.k-in` |
+| Saarthi's chat | Messages slide in, answers are written with a glowing caret, three dots bounce before the first word, suggestion chips arrive one after another, the question box cycles example questions | `.k-chat-in`, `.k-streaming`, `.k-typing`, `.k-chip-suggest` in `styles/astra.css`; `useTypedPrompt` in `assistant/SaarthiPanel.tsx` |
 | Both | Magnetic buttons (RUN, the call-to-action buttons) and click ripples | `fx/MagneticField.tsx`: one global listener for `[data-magnetic]` and `[data-ripple]` |
 | Console | Ctrl+K command palette: run, save, explain, the quick fix at the cursor, every language, every example, editor actions, view switches, help; fuzzy search; `:42` goes to line 42 | `workspace/CommandPalette.tsx`, `workspace/commands.tsx` |
 | Console | Saarthi can be dragged anywhere in the editor (the spot is remembered), moved with the arrow keys, double-clicked to wave; five quick clicks make it spin | `mascot/Companion.tsx` |
@@ -207,8 +216,10 @@ never restyles the whole page.
 
 CSS animations move only `transform` and `opacity`; the panel spotlight
 repaints one empty element's background; the code-glyph canvas draws only
-while it is on screen and the tab is visible; the command palette builds its
-list only while it is open. Keystroke-to-markers latency
+while it is on screen and the tab is visible; the star field exists only
+during the boot and the launch; the chat's typed example questions hold still
+while the student types; panel dividers redraw once per animation frame while
+dragged; the command palette builds its list only while it is open. Keystroke-to-markers latency
 is measured by `e2e/latency.spec.ts` (500-line files, 14 languages, 20 edits
 each, 150 ms pause included); see the milestone report for the numbers of
 each run. The concept request is separate from the check (it runs after the
@@ -235,6 +246,15 @@ shared variables, errors, the live typo check, the terminal and its console,
 the time limit, `.ipynb` export and import, reloads);
 `e2e/extensions.spec.ts` Prettier, clang-format and Black, Format on Save,
 the palette's Format document, Emmet, the Vim keymap, the notebook switch and
-AI autocomplete; `e2e/preview.spec.ts` HTML, CSS and React in the preview.
+AI autocomplete; `e2e/preview.spec.ts` HTML, CSS and React in the preview;
+`e2e/workbench.spec.ts` the VS Code-style workspace (dragging and keyboard
+resizing of the terminal, side bar and Saarthi's panel, maximize and restore,
+Ctrl+\`, Ctrl+B and Ctrl+Alt+B, hiding by dragging, the layout kept across a
+reload), Saarthi's streamed chat (written word by word, Stop, New chat, the
+one-click suggestions), installing KAIRO as an app (manifest, icons, service
+worker, the Install button and the browser's prompt) and the boot's star
+field. Unit tests: `layout/workbench.test.ts` (sizes and limits),
+`api/client.test.ts` (streamed runs and answers), `cloud/sync.test.ts`
+(merging an account's saved work).
 `notebook/model.test.ts` covers splitting a run into cells and the `.ipynb`
 format.

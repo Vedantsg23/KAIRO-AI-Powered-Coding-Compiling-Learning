@@ -9,6 +9,12 @@ Two wire formats cover the useful options:
              a model running on the school's own machine with Ollama or LM
              Studio (set CC_AI_BASE_URL, e.g. http://localhost:11434/v1).
              Structured answers use JSON mode plus the schema in the prompt.
+  gateway    Vercel AI Gateway, which speaks the OpenAI format for many model
+             vendors. On Vercel it authenticates with the deployment's OIDC
+             token (renewed by the platform), so no key is stored anywhere.
+
+Free-form answers can also be streamed (stream()), so Saarthi's chat shows
+the answer while it is being written, like ChatGPT or Copilot.
 
 Keys are read from the server's environment only and sent only to the
 configured provider. Errors never echo the key or the provider's raw body.
@@ -19,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -35,6 +42,10 @@ OPENAI_URL = "https://api.openai.com/v1"
 # (Claude API docs, models overview, September 2026). For deeper answers set
 # CC_AI_MODEL=claude-sonnet-5.
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+GATEWAY_URL = "https://ai-gateway.vercel.sh/v1"
+# Gemini 3.5 Flash Lite: fast (about 0.5 s to the first token) and inexpensive
+# (AI Gateway model page, October 2026). Override with CC_AI_MODEL.
+DEFAULT_GATEWAY_MODEL = "google/gemini-3.5-flash-lite"
 
 
 class ProviderError(Exception):
@@ -70,6 +81,8 @@ class Provider(Protocol):
     async def complete(self, *, system: str, messages: list[dict], max_tokens: int,
                        tool: ToolSpec | None = None) -> Completion: ...
 
+    def stream(self, *, system: str, messages: list[dict], max_tokens: int) -> AsyncIterator[str]: ...
+
 
 @dataclass(frozen=True)
 class ProviderChoice:
@@ -77,8 +90,12 @@ class ProviderChoice:
     reason: str | None  # why there is no provider (shown on the status endpoint)
 
 
-def choose_provider(settings: ApiSettings, http: httpx.AsyncClient) -> ProviderChoice:
-    """The configured provider, or the reason Saarthi is switched off."""
+def choose_provider(settings: ApiSettings, http: httpx.AsyncClient,
+                    oidc_token: Callable[[], str | None] | None = None) -> ProviderChoice:
+    """The configured provider, or the reason Saarthi is switched off.
+
+    oidc_token returns the deployment's current Vercel OIDC token (gateway only).
+    """
     if settings.ai_provider == "none":
         return ProviderChoice(None, "Saarthi is switched off on this server (CC_AI_PROVIDER=none).")
     if settings.ai_provider == "anthropic":
@@ -88,6 +105,14 @@ def choose_provider(settings: ApiSettings, http: httpx.AsyncClient) -> ProviderC
         return ProviderChoice(AnthropicProvider(http, key.get_secret_value().strip(),
                                                 settings.ai_model or DEFAULT_ANTHROPIC_MODEL,
                                                 settings.ai_base_url or ANTHROPIC_URL), None)
+    if settings.ai_provider == "gateway":
+        secret = settings.ai_api_key or settings.ai_gateway_api_key
+        fixed = secret.get_secret_value().strip() if secret is not None else ""
+        if not fixed and oidc_token is None:
+            return ProviderChoice(None, "No AI Gateway key is set on the server (AI_GATEWAY_API_KEY).")
+        key: str | Callable[[], str | None] = fixed or oidc_token  # type: ignore[assignment]
+        return ProviderChoice(OpenAICompatibleProvider(http, key, settings.ai_model or DEFAULT_GATEWAY_MODEL,
+                                                       settings.ai_base_url or GATEWAY_URL, name="gateway"), None)
     # OpenAI-compatible
     key = settings.ai_api_key or settings.openai_api_key
     key_value = key.get_secret_value().strip() if key is not None else ""
@@ -97,6 +122,17 @@ def choose_provider(settings: ApiSettings, http: httpx.AsyncClient) -> ProviderC
     if base_url == OPENAI_URL and not key_value:
         return ProviderChoice(None, "No OpenAI API key is set on the server (OPENAI_API_KEY).")
     return ProviderChoice(OpenAICompatibleProvider(http, key_value, settings.ai_model, base_url), None)
+
+
+def with_model(provider: Provider | None, model: str) -> Provider | None:
+    """The same provider and credentials with another model (e.g. a faster one for completions)."""
+    if provider is None or not model or model == provider.model:
+        return provider
+    if isinstance(provider, AnthropicProvider):
+        return AnthropicProvider(provider._http, provider._key, model, provider._base_url)
+    if isinstance(provider, OpenAICompatibleProvider):
+        return OpenAICompatibleProvider(provider._http, provider._key, model, provider._base_url, name=provider.name)
+    return provider
 
 
 def _raise_for_status(response: httpx.Response, provider: str) -> None:
@@ -124,7 +160,37 @@ class AnthropicProvider:
         self._http = http
         self._key = key
         self.model = model
+        self._base_url = base_url
         self._url = base_url.rstrip("/") + "/v1/messages"
+
+    async def stream(self, *, system: str, messages: list[dict], max_tokens: int) -> AsyncIterator[str]:
+        """The answer's text as it is generated (server-sent events)."""
+        body = {"model": self.model, "max_tokens": max_tokens, "system": system, "messages": messages,
+                "stream": True}
+        headers = {"x-api-key": self._key, "anthropic-version": ANTHROPIC_VERSION,
+                   "content-type": "application/json", "accept": "text/event-stream"}
+        try:
+            async with self._http.stream("POST", self._url, json=body, headers=headers) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    _raise_for_status(response, self.name)
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    try:
+                        event = json.loads(line[5:].strip())
+                    except ValueError:
+                        continue
+                    if event.get("type") == "content_block_delta":
+                        delta = event.get("delta") or {}
+                        if delta.get("type") == "text_delta" and delta.get("text"):
+                            yield delta["text"]
+                    elif event.get("type") == "error":
+                        raise ProviderError("The AI provider stopped while answering. Try again.")
+        except httpx.TimeoutException as exc:
+            raise ProviderError("The AI provider took too long to answer. Try again.") from exc
+        except httpx.HTTPError as exc:
+            raise ProviderError("The server could not reach the AI provider.") from exc
 
     async def complete(self, *, system: str, messages: list[dict], max_tokens: int,
                        tool: ToolSpec | None = None) -> Completion:
@@ -169,11 +235,51 @@ _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
 class OpenAICompatibleProvider:
     name = "openai"
 
-    def __init__(self, http: httpx.AsyncClient, key: str, model: str, base_url: str = OPENAI_URL) -> None:
+    def __init__(self, http: httpx.AsyncClient, key: str | Callable[[], str | None], model: str,
+                 base_url: str = OPENAI_URL, name: str = "openai") -> None:
         self._http = http
-        self._key = key
+        self._key = key  # a fixed key, or a function returning the current token (Vercel OIDC)
         self.model = model
+        self.name = name
+        self._base_url = base_url
         self._url = base_url.rstrip("/") + "/chat/completions"
+
+    def _headers(self) -> dict[str, str]:
+        key = self._key() if callable(self._key) else self._key
+        if callable(self._key) and not key:
+            raise ProviderError("Saarthi cannot sign in to the AI service yet. Try again in a moment.")
+        headers = {"content-type": "application/json"}
+        if key:
+            headers["authorization"] = f"Bearer {key}"
+        return headers
+
+    async def stream(self, *, system: str, messages: list[dict], max_tokens: int) -> AsyncIterator[str]:
+        """The answer's text as it is generated (server-sent events, OpenAI format)."""
+        body = {"model": self.model, "max_tokens": max_tokens, "stream": True,
+                "messages": [{"role": "system", "content": system}, *messages]}
+        headers = {**self._headers(), "accept": "text/event-stream"}
+        try:
+            async with self._http.stream("POST", self._url, json=body, headers=headers) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    _raise_for_status(response, self.name)
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                        piece = (chunk.get("choices") or [{}])[0].get("delta", {}).get("content")
+                    except (ValueError, AttributeError, IndexError):
+                        continue
+                    if piece:
+                        yield piece
+        except httpx.TimeoutException as exc:
+            raise ProviderError("The AI server took too long to answer. Try again.") from exc
+        except httpx.HTTPError as exc:
+            raise ProviderError("The server could not reach the AI server.") from exc
 
     async def complete(self, *, system: str, messages: list[dict], max_tokens: int,
                        tool: ToolSpec | None = None) -> Completion:
@@ -184,9 +290,7 @@ class OpenAICompatibleProvider:
                       "messages": [{"role": "system", "content": system}, *messages]}
         if tool is not None:
             body["response_format"] = {"type": "json_object"}
-        headers = {"content-type": "application/json"}
-        if self._key:
-            headers["authorization"] = f"Bearer {self._key}"
+        headers = self._headers()
         try:
             response = await self._http.post(self._url, json=body, headers=headers)
         except httpx.TimeoutException as exc:

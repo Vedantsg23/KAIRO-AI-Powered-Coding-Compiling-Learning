@@ -21,6 +21,7 @@ import json
 import secrets
 import time
 from collections import OrderedDict, deque
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -45,6 +46,7 @@ from ..schemas.assistant import (
     VerifyOut,
 )
 from ..schemas.diagnostics import Severity
+from ..services.evidence import EvidenceSeal, execution_from_payload
 from ..services.presenters import summarize
 from . import prompts
 from .context import build_evidence, build_source_only, defuse, pick_focus
@@ -159,6 +161,37 @@ class FixProposal:
     before_errors: int
     created: float = field(default_factory=time.monotonic)
 
+    def payload(self) -> dict:
+        """What the fix token carries (FixOut.fixToken), so any instance can verify the fix."""
+        return {"fixId": self.fix_id, "executionId": self.execution_id, "languageId": self.language_id,
+                "baseHash": self.base_hash, "patchedHash": self.patched_hash, "targetCodes": self.target_codes,
+                "beforeState": self.before_state, "beforeErrors": self.before_errors}
+
+    @classmethod
+    def from_payload(cls, data: dict) -> FixProposal | None:
+        try:
+            return cls(fix_id=str(data["fixId"]), execution_id=str(data["executionId"]),
+                       language_id=str(data["languageId"]), base_hash=str(data["baseHash"]),
+                       patched_hash=str(data["patchedHash"]), target_codes=[str(c) for c in data["targetCodes"]],
+                       before_state=str(data["beforeState"]), before_errors=int(data["beforeErrors"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
+FIX_TTL_S = 2 * 3600  # how long a proposed fix can still be verified
+
+
+@dataclass
+class _AskPlan:
+    """A question, ready for the model: the provider, the messages and what grounds the answer."""
+
+    provider: Provider
+    messages: list[dict]
+    key: str
+    grounded: str
+    execution_id: str | None
+    source_hash: str | None
+
 
 # ------------------------------------------------------ model answer shapes
 
@@ -270,8 +303,11 @@ def apply_edits(source: str, edits: list[_EditDraft]) -> str:
 
 class AssistantService:
     def __init__(self, settings: ApiSettings, registry: LanguageRegistry, executions,
-                 provider: Provider | None, disabled_reason: str | None) -> None:
+                 provider: Provider | None, disabled_reason: str | None,
+                 seal: EvidenceSeal | None = None) -> None:
         self.settings = settings
+        # Opens the sealed runs and fixes the browser sends back (see services/evidence.py).
+        self.seal = seal or EvidenceSeal(None)
         self.registry = registry
         self.executions = executions  # ExecutionService: .get(execution_id)
         self.provider = provider
@@ -283,7 +319,7 @@ class AssistantService:
         self.complete_limiter = RateLimiter(settings.ai_complete_per_minute, settings.ai_complete_per_day,
                                             settings.ai_complete_daily_budget)
         self.completions = TTLCache(ttl_s=600, max_entries=2_000)
-        self.fixes = TTLCache(ttl_s=2 * 3600, max_entries=1_000)
+        self.fixes = TTLCache(ttl_s=FIX_TTL_S, max_entries=1_000)
         self._slots = asyncio.Semaphore(settings.ai_max_concurrency)
 
     # ---------------------------------------------------------------- status
@@ -302,7 +338,7 @@ class AssistantService:
 
     async def explain(self, request: ExplainIn, client: str) -> ExplanationOut:
         provider = self._require_provider()
-        execution, profile = self._finished_execution(request.execution_id, request.source_hash)
+        execution, profile = self._finished_execution(request.execution_id, request.source_hash, request.evidence)
         focus = pick_focus(execution, request.diagnostic_id)
         if request.diagnostic_id and focus is None:
             raise NotFound("That diagnostic is not part of this run.")
@@ -339,7 +375,7 @@ class AssistantService:
 
     async def fix(self, request: FixIn, client: str) -> FixOut:
         provider = self._require_provider()
-        execution, profile = self._finished_execution(request.execution_id, request.source_hash)
+        execution, profile = self._finished_execution(request.execution_id, request.source_hash, request.evidence)
         focus = pick_focus(execution, request.diagnostic_id)
         if focus is None:
             raise NothingToDo("This run has no error or warning to fix.")
@@ -382,7 +418,7 @@ class AssistantService:
             edits=[PatchEditOut(start_line=e.start_line, end_line=e.end_line, replacement=e.replacement)
                    for e in sorted(draft.edits, key=lambda e: e.start_line)],
             target_codes=proposal.target_codes, confidence=draft.confidence,
-            provider=provider.name, model=provider.model,
+            provider=provider.name, model=provider.model, fix_token=self.seal.seal("fix", proposal.payload()),
         )
         self.cache.put(key, answer)
         return answer
@@ -391,9 +427,14 @@ class AssistantService:
 
     def verify(self, request: VerifyIn) -> VerifyOut:
         proposal = self.fixes.get(request.fix_id)
+        if not isinstance(proposal, FixProposal) and request.fix_token:
+            data = self.seal.open("fix", request.fix_token, max_age_s=FIX_TTL_S)
+            sealed = FixProposal.from_payload(data) if data else None
+            if sealed is not None and sealed.fix_id == request.fix_id:
+                proposal = sealed
         if not isinstance(proposal, FixProposal):
             raise NotFound("This fix has expired. Ask Saarthi for a new one.")
-        execution = self.executions.get(request.execution_id)
+        execution = self._execution(request.execution_id, request.evidence)
         if execution is None:
             raise NotFound("That run was not found (runs are kept for a limited time).")
         if not execution.terminal:
@@ -421,7 +462,8 @@ class AssistantService:
 
     # ----------------------------------------------------------------- ask
 
-    async def ask(self, request: AskIn, client: str) -> AskOut:
+    def _plan_ask(self, request: AskIn) -> _AskPlan:
+        """Check the question and gather its evidence; raises before any model call."""
         provider = self._require_provider()
         grounded = "none"
         execution_id = None
@@ -429,9 +471,10 @@ class AssistantService:
         if request.execution_id:
             if not request.source_hash:
                 raise Conflict("Send the hash of the code in the editor with the run id.")
-            execution, profile = self._finished_execution(request.execution_id, request.source_hash)
+            execution, profile = self._finished_execution(request.execution_id, request.source_hash, request.evidence)
+            focus = pick_focus(execution, request.diagnostic_id) if request.diagnostic_id else None
             evidence = build_evidence(execution, profile, summarize(execution, profile, None),
-                                      pick_focus(execution, None), request.question).text
+                                      focus or pick_focus(execution, None), request.question).text
             grounded, execution_id, hash_ = "execution", execution.id, execution.source_hash
         elif request.source is not None and request.source.strip():
             profile = self.registry.get(request.language_id) if request.language_id else None
@@ -442,21 +485,86 @@ class AssistantService:
         history = [{"role": t.role, "content": defuse(t.content)} for t in request.history[-8:]]
         while history and history[0]["role"] != "user":
             history.pop(0)  # the conversation must start with the student
-        key = self._cache_key("ask", hash_ or "", execution_id or "", request.question,
+        key = self._cache_key("ask", hash_ or "", execution_id or "", request.diagnostic_id or "", request.question,
                               json.dumps(history, sort_keys=True))
-        cached = self.cache.get(key)
+        messages = [*_alternate(history), {"role": "user", "content": f"{prompts.ASK_TASK}\n\n{evidence}"}]
+        return _AskPlan(provider=provider, messages=messages, key=key, grounded=grounded,
+                        execution_id=execution_id, source_hash=hash_)
+
+    async def ask(self, request: AskIn, client: str) -> AskOut:
+        plan = self._plan_ask(request)
+        cached = self.cache.get(plan.key)
         if isinstance(cached, AskOut):
             return cached.model_copy(update={"cached": True})
-        messages = [*_alternate(history), {"role": "user", "content": f"{prompts.ASK_TASK}\n\n{evidence}"}]
-        completion = await self._complete(provider, client, messages, None,
-                                          max_tokens=min(self.settings.ai_max_output_tokens, 900))
+        completion = await self._complete(plan.provider, client, plan.messages, None, max_tokens=self._ask_tokens())
         text = (completion.text or "").strip()
         if not text:
             raise BadAnswer("Saarthi returned an empty answer. Please try again.")
-        answer = AskOut(answer=text[:6_000], grounded_on=grounded, execution_id=execution_id, source_hash=hash_,
-                        provider=provider.name, model=provider.model)
-        self.cache.put(key, answer)
+        answer = self._ask_answer(plan, text)
+        self.cache.put(plan.key, answer)
         return answer
+
+    def ask_stream(self, request: AskIn, client: str) -> AsyncIterator[str]:
+        """The answer as NDJSON lines while the model writes it (Saarthi's chat, like Copilot):
+
+            {"type": "start", "groundedOn": ..., "executionId": ..., "sourceHash": ..., "provider": ..., "model": ...}
+            {"type": "delta", "text": "..."}            (many)
+            {"type": "done", "cached": false}           or {"type": "error", "detail": "...", "retryAfterS": ...}
+
+        Problems found before the model is called (stale code, limits) raise an
+        AssistantError here, so the endpoint can answer with a normal HTTP error.
+        """
+        plan = self._plan_ask(request)
+        cached = self.cache.get(plan.key)
+        if not isinstance(cached, AskOut):
+            cached = None
+            self.limiter.acquire(client)
+        return self._ask_events(plan, cached)
+
+    async def _ask_events(self, plan: _AskPlan, cached: AskOut | None) -> AsyncIterator[str]:
+        def line(event: dict) -> str:
+            return json.dumps(event, ensure_ascii=False) + "\n"
+
+        yield line({"type": "start", "groundedOn": plan.grounded, "executionId": plan.execution_id,
+                    "sourceHash": plan.source_hash, "provider": plan.provider.name, "model": plan.provider.model})
+        if cached is not None:  # the same question about the same code: replay the answer quickly
+            for piece in _pieces(cached.answer):
+                yield line({"type": "delta", "text": piece})
+                await asyncio.sleep(0.008)
+            yield line({"type": "done", "cached": True})
+            return
+        parts: list[str] = []
+        try:
+            async with self._slots:
+                async with asyncio.timeout(self.settings.ai_timeout_s + 30):
+                    async for piece in plan.provider.stream(system=prompts.SYSTEM, messages=plan.messages,
+                                                            max_tokens=self._ask_tokens()):
+                        if sum(map(len, parts)) >= 6_000:
+                            break  # long enough for a chat answer
+                        parts.append(piece)
+                        yield line({"type": "delta", "text": piece})
+        except TimeoutError:
+            yield line({"type": "error", "detail": "Saarthi took too long to answer. Please try again.",
+                        "retryAfterS": None})
+            return
+        except ProviderError as exc:
+            yield line({"type": "error", "detail": exc.public, "retryAfterS": exc.retry_after_s})
+            return
+        text = "".join(parts).strip()
+        if not text:
+            yield line({"type": "error", "detail": "Saarthi returned an empty answer. Please try again.",
+                        "retryAfterS": None})
+            return
+        self.cache.put(plan.key, self._ask_answer(plan, text))
+        yield line({"type": "done", "cached": False})
+
+    def _ask_tokens(self) -> int:
+        return min(self.settings.ai_max_output_tokens, 900)
+
+    @staticmethod
+    def _ask_answer(plan: _AskPlan, text: str) -> AskOut:
+        return AskOut(answer=text[:6_000], grounded_on=plan.grounded, execution_id=plan.execution_id,
+                      source_hash=plan.source_hash, provider=plan.provider.name, model=plan.provider.model)
 
     # ------------------------------------------------------------ complete
 
@@ -504,8 +612,18 @@ class AssistantService:
             raise AssistantDisabled(f"Saarthi is not available: {self.disabled_reason}")
         return self.provider
 
-    def _finished_execution(self, execution_id: str, editor_hash: str) -> tuple[Execution, object]:
+    def _execution(self, execution_id: str, evidence: str | None) -> Execution | None:
+        """The run from this instance's memory, else from its sealed evidence (any instance)."""
         execution = self.executions.get(execution_id)
+        if execution is None and evidence:
+            payload = self.seal.open("execution", evidence)
+            if payload is not None and payload.get("id") == execution_id:
+                execution = execution_from_payload(payload)
+        return execution
+
+    def _finished_execution(self, execution_id: str, editor_hash: str,
+                            evidence: str | None = None) -> tuple[Execution, object]:
+        execution = self._execution(execution_id, evidence)
         if execution is None:
             raise NotFound("That run was not found (runs are kept for a limited time). Run the code again.")
         if execution.source_hash != editor_hash:
@@ -575,3 +693,14 @@ def clean_completion(text: str, before: str, after: str, max_lines: int) -> str:
     if head and text.endswith(head):
         text = text[: -len(head)].rstrip()
     return text if text.strip() else ""
+
+
+def _pieces(text: str, size: int = 24) -> list[str]:
+    """A cached answer cut into short pieces (at spaces where possible) to replay it as a stream."""
+    pieces: list[str] = []
+    while text:
+        cut = text.rfind(" ", 0, size) + 1 if len(text) > size else len(text)
+        cut = cut if cut > 0 else size
+        pieces.append(text[:cut])
+        text = text[cut:]
+    return pieces

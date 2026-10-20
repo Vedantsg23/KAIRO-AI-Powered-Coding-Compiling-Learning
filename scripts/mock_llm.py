@@ -11,7 +11,11 @@ put in the prompt, and fills the answer from it with fixed rules:
   ask      echoes the question with a fixed, clearly labelled reply
   complete continues "printf(", "for (" and "print(" with fixed text, else nothing
 
-Every answer says it comes from the mock. Run it with:
+Requests with "stream": true get the answer as server-sent events, a few
+words per chunk, like a real model streams its reply. A question containing
+"[slow]" gets a longer answer, streamed slowly (about 4 s), so a browser test
+can watch it being written and stop it. Every answer says it comes from the
+mock. Run it with:
     python scripts/mock_llm.py --port 8099
 and start the API with CC_AI_PROVIDER=openai CC_AI_BASE_URL=http://127.0.0.1:8099/v1 CC_AI_MODEL=mock-saarthi
 """
@@ -21,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 FOCUS = re.compile(
@@ -78,11 +83,17 @@ def complete(evidence: str) -> str:
     return ""
 
 
+SLOW = "[slow]"
+
+
 def ask(evidence: str) -> str:
     question = evidence.rsplit("<question>", 1)[-1].split("</question>", 1)[0].strip()
-    return (f"(mock answer) You asked: **{question[:200]}**\n\n"
-            "- This reply comes from the test double in `scripts/mock_llm.py`, not from an AI.\n"
-            "- Configure a real provider to get real answers.")
+    answer = (f"(mock answer) You asked: **{question[:200]}**\n\n"
+              "- This reply comes from the test double in `scripts/mock_llm.py`, not from an AI.\n"
+              "- Configure a real provider to get real answers.")
+    if SLOW in question:
+        answer += "\n\n" + " ".join(f"step{n}" for n in range(1, 49)) + " end."
+    return answer
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -98,6 +109,9 @@ class Handler(BaseHTTPRequestHandler):
             content = complete(evidence)
         else:
             content = ask(evidence)
+        if body.get("stream"):
+            self._stream(content, body.get("model", "mock"))
+            return
         reply = {"id": "mock", "object": "chat.completion", "model": body.get("model", "mock"),
                  "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
                  "usage": {"prompt_tokens": len(evidence) // 4, "completion_tokens": len(content) // 4}}
@@ -107,6 +121,27 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("content-length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _stream(self, content: str, model: str) -> None:
+        """The answer as OpenAI-style server-sent events, three words at a time."""
+        self.send_response(200)
+        self.send_header("content-type", "text/event-stream")
+        self.send_header("cache-control", "no-cache")
+        self.end_headers()
+        words = re.findall(r"\S+\s*", content)
+        pause = 0.2 if SLOW in content else 0.02
+        try:
+            for i in range(0, len(words), 3):
+                chunk = {"id": "mock", "object": "chat.completion.chunk", "model": model,
+                         "choices": [{"index": 0, "delta": {"content": "".join(words[i:i + 3])},
+                                      "finish_reason": None}]}
+                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+                self.wfile.flush()
+                time.sleep(pause)
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the client stopped reading (the student pressed Stop)
 
     def log_message(self, format: str, *args) -> None:  # keep test output quiet
         pass

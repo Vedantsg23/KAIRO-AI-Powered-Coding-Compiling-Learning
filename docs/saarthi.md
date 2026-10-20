@@ -13,7 +13,7 @@ marked as not AI.
 | **Explain** | "Explain" on a problem card, or Ctrl+Shift+Enter in the editor | Saarthi explains that diagnostic of the last run: what went wrong, what happened, why, which line to look at, what to change, related concepts, and a confidence level. |
 | **Suggest a fix** | "Fix" on a problem card | Saarthi proposes the smallest edit as a line diff. **Nothing changes** until the student presses *Apply* or *Apply & verify*. |
 | **Apply & verify** | on the suggested patch | The patch is applied (one Ctrl+Z undoes it, or *Undo fix*) and the program is run again; the verdict comes from that run, not from the model. |
-| **Ask** | the Saarthi panel | A free question about the code, a concept or the last run. Sent only when the student presses Enter. Without a model, the offline Saarthi answers. |
+| **Ask** | the Saarthi chat panel (right side, like Copilot) | A free question about the code, a concept or the last run, sent when the student presses Enter or taps a suggestion ("Explain this error", "Give me a hint"...). The answer **streams in word by word**; *Stop* ends it early, *New chat* starts over, each answer has a copy button. Without a model, the offline Saarthi answers. |
 | **Live analysis** | the Saarthi panel's "Live analysis" card | While the student types: syntax errors, possible typos ("Did you mean `printf`?") and tips, each with the line and, when it is safe, a one-click fix. Computed in the browser, never sent anywhere. |
 | **AI autocomplete** | the editor, when the student switches the extension on | After a short pause in typing, a suggestion for the next lines appears as grey ghost text; Tab accepts it, Esc or typing on dismisses it. Off by default. |
 
@@ -41,6 +41,33 @@ editor, otherwise the editor's code, plus up to 8 earlier turns of the chat.
 The request must carry the editor's current source hash. If the code changed
 since the run, the API answers `409` and the panel asks the student to run
 again: an answer never describes code that is no longer there.
+
+On Vercel every request may reach a different server instance, so the run the
+answer is grounded in travels with the request: the API signs the run's
+evidence (HMAC with `CC_EVIDENCE_SECRET`) when the run finishes, the browser
+sends it back with *explain*, *fix* and *ask*, and the API checks the
+signature and the source hash before using it. A suggested fix is signed the
+same way (`fixToken`) so *Apply & verify* works on any instance. Tampered or
+foreign evidence is refused (`404`), and old evidence for code that changed is
+`409` as above.
+
+## Streaming answers
+
+`POST /api/v1/assistant/ask/stream` takes the same body as `/ask` and answers
+with newline-delimited JSON (`application/x-ndjson`), one event per line:
+
+| Event | Fields | Meaning |
+|---|---|---|
+| `start` | `groundedOn`, `executionId`, `sourceHash`, `provider`, `model` | What the answer is grounded in (a run, or the editor's code). |
+| `delta` | `text` | The next piece of the answer; the panel appends it as it arrives. |
+| `done` | `cached` | The answer is complete (and now cached). |
+| `error` | `detail`, `retryAfterS` | The model failed or took too long after the stream started; the panel keeps what arrived and shows the message. |
+
+Stale code (`409`) and rate limits (`429`) are ordinary HTTP errors, returned
+before the stream starts. An identical question within the cache time replays
+the cached answer as a quick stream and does not count against the limits.
+Answers stop at 6,000 characters. The panel draws the arriving text once per
+animation frame, so long answers stay smooth.
 
 Nothing is sent while the student types, and the live check never calls the
 server or the AI, with one exception the student chooses: the **AI
@@ -82,25 +109,34 @@ Set on the API process (never in the browser; `.env` is not committed):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CC_AI_PROVIDER` | `anthropic` | `anthropic`, `openai` (any OpenAI-compatible server) or `none` |
+| `CC_AI_PROVIDER` | `gateway` on Vercel, otherwise `anthropic` | `anthropic`, `openai` (any OpenAI-compatible server), `gateway` (Vercel AI Gateway) or `none` |
 | `ANTHROPIC_API_KEY` | empty | Key for Claude. Without it Saarthi is off. |
-| `CC_AI_MODEL` | `claude-haiku-4-5-20251001` | Model id, e.g. `claude-sonnet-5` for deeper answers |
+| `CC_AI_MODEL` | `claude-haiku-4-5-20251001`; `google/gemini-3.5-flash-lite` with `gateway` | Model id, e.g. `claude-sonnet-5` for deeper answers |
 | `CC_AI_BASE_URL` | empty | For `openai`: e.g. `http://127.0.0.1:11434/v1` (Ollama) |
 | `CC_AI_API_KEY` or `OPENAI_API_KEY` | empty | For `openai` servers that need a key (Ollama does not) |
 | `CC_AI_TIMEOUT_S` | 45 | Per request |
 | `CC_AI_MAX_OUTPUT_TOKENS` | 1500 | Per answer |
-| `CC_AI_REQUESTS_PER_MINUTE` | 6 | Per client (IP address) |
+| `CC_AI_REQUESTS_PER_MINUTE` | 10 | Per client (IP address; on Vercel the address Vercel reports in `x-real-ip`) |
 | `CC_AI_REQUESTS_PER_DAY` | 150 | Per client |
 | `CC_AI_DAILY_BUDGET` | 3000 | For the whole server |
 | `CC_AI_MAX_CONCURRENCY` | 4 | Requests in flight to the provider |
 | `CC_AI_CACHE_TTL_S` | 1800 | Identical requests (same model, run, diagnostic, question) are answered from memory, marked `cached`, and do not count against the limits |
-
 | `CC_AI_COMPLETE_PER_MINUTE` | 30 | AI autocomplete requests per client |
 | `CC_AI_COMPLETE_PER_DAY` | 1500 | AI autocomplete requests per client per day |
 | `CC_AI_COMPLETE_DAILY_BUDGET` | 20000 | AI autocomplete requests for the whole server per day |
 
 `GET /api/v1/assistant/status` reports whether Saarthi is enabled, the
 provider and model, and the limits; it never returns a key.
+
+### Vercel AI Gateway (the live site)
+
+On Vercel the API uses `gateway` by default and signs in with the
+deployment's own OIDC token (Vercel adds it to every request), so **no AI key
+is stored anywhere**: enable AI Gateway for the team in the Vercel dashboard
+(the free monthly credit is enough for a class), redeploy, and Saarthi is on.
+To choose another model, set `CC_AI_MODEL` to any model id from the Gateway's
+model list (for example `anthropic/claude-haiku-4.5`). Outside Vercel the
+gateway can be used with `AI_GATEWAY_API_KEY`.
 
 ### Claude
 
@@ -180,10 +216,16 @@ an AI model", and when a model is configured but failed, the answer says why.
   a scripted fake Claude on the wire (the real Messages API request format):
   grounding, stale hashes, patch validation, verdicts, rate limits, cache,
   prompt-injection text staying inside the evidence, keys never exposed.
+* `services/api/tests/test_vercel.py` covers the live-site setup: streamed
+  answers from a fake AI Gateway (server-sent events), the cached replay,
+  `409`/`429` before the stream and the `error` event after it, signed
+  evidence and fix tokens across server instances (tampered, foreign or stale
+  evidence refused), and per-visitor limits behind Vercel's proxy.
 * `scripts/mock_llm.py` is a canned OpenAI-compatible server for the browser
   tests and offline demos. **It is not an AI**: it restates the focused
   diagnostic, fixes only "missing ';'", completes only a few fixed line
   endings (`printf(`, `for (`, `print(`), and labels every answer "(mock)".
+  It streams when asked to, three words at a time.
   `make mock-ai` + `make api-mock` start it; `apps/web/e2e/saarthi.spec.ts`
   runs only against it.
 * `apps/web/e2e/extensions.spec.ts` turns the AI autocomplete extension on and

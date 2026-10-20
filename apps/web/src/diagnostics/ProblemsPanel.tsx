@@ -1,5 +1,5 @@
 import { CheckCircle2, History, Loader2, RotateCw, ShieldCheck, Wrench, Zap } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { Execution, Language, RawOutputReference } from "../api/types";
 import type { LiveProblem } from "../live/analyze";
 import { topicCode } from "../live/topics";
@@ -28,9 +28,11 @@ interface Props {
   onApplyLiveFix?(problem: LiveProblem): void;
   /** Hide the panel header (on phones the tab already names it). */
   bare?: boolean;
+  /** Buttons at the right end of the header (maximize and hide the panel). */
+  actions?: ReactNode;
 }
 
-/** DIAGNOSTICS: live syntax problems while typing, then the last run's errors, warnings and crashes. */
+/** PROBLEMS: live syntax problems while typing, then the last run's errors, warnings and crashes. */
 export function ProblemsPanel(props: Props) {
   const { execution, stale, language } = props;
   const [filter, setFilter] = useState<Filter>("all");
@@ -41,9 +43,9 @@ export function ProblemsPanel(props: Props) {
   const fileName = language?.sourceFile ?? "";
 
   return (
-    <section className="@container flex h-full min-h-0 flex-col" data-tour="problems" aria-label="Diagnostics">
+    <section className="@container flex h-full min-h-0 flex-col" data-tour="problems" aria-label="Problems">
       {!props.bare && (
-        <PanelHead index="04" title="Diagnostics">
+        <PanelHead index="04" title="Problems">
           <span className="flex shrink-0 gap-1 whitespace-nowrap font-mono text-[10px] font-bold">
             {props.liveProblems.length > 0 && <span className="rounded border border-warn/40 bg-warn/12 px-1.5 text-warn-fg">{props.liveProblems.length} live</span>}
             {counts.error > 0 && <span className="rounded border border-danger/35 bg-danger/10 px-1.5 text-danger-fg">{counts.error} err</span>}
@@ -66,6 +68,7 @@ export function ProblemsPanel(props: Props) {
               ))}
             </div>
           )}
+          {props.actions}
         </PanelHead>
       )}
 

@@ -5,16 +5,20 @@ POST /api/v1/assistant/explain  explain one diagnostic of a finished run
 POST /api/v1/assistant/fix      propose a minimal patch for it (not applied)
 POST /api/v1/assistant/verify   compare the run of the patched code with the original
 POST /api/v1/assistant/ask      answer a question about the code or a run
+POST /api/v1/assistant/ask/stream  the same answer, streamed as it is written (NDJSON)
 POST /api/v1/assistant/complete inline code completion (ghost text) at the cursor
 
 Explain, fix and ask call the AI provider and are rate-limited per client;
 verify does not call the model at all.
+
+Requests about a run may carry its sealed evidence (ExecutionOut.evidence) and
+a fix's token (FixOut.fixToken), so any server instance can answer them.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...ai.service import AssistantError, AssistantService
 from ...schemas.assistant import (
@@ -42,6 +46,13 @@ def _service(request: Request) -> AssistantService:
 
 
 def _client(request: Request) -> str:
+    """The client address rate limits count against. Behind Vercel's proxy the socket
+    address is the proxy's; Vercel sets X-Real-IP / X-Forwarded-For to the visitor's."""
+    if request.app.state.settings.trust_proxy_headers:
+        forwarded = request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for", "")
+        address = forwarded.split(",")[0].strip()
+        if address:
+            return address
     return request.client.host if request.client else "unknown"
 
 
@@ -90,6 +101,22 @@ async def ask(body: AskIn, request: Request):
         return await _service(request).ask(body, _client(request))
     except AssistantError as exc:
         return _error(exc)
+
+
+@router.post(
+    "/ask/stream",
+    responses={200: {"content": {"application/x-ndjson": {}},
+                     "description": "start, then delta events with the text as it is written, then done (or error)."},
+               **_ERRORS},
+)
+async def ask_stream(body: AskIn, request: Request):
+    """Answer a question, streaming the text while the model writes it (one JSON object per line)."""
+    try:
+        events = _service(request).ask_stream(body, _client(request))
+    except AssistantError as exc:
+        return _error(exc)
+    return StreamingResponse(events, media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 @router.post("/complete", response_model=CompleteOut, responses=_ERRORS)

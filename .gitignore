@@ -16,6 +16,11 @@ apps/web/playwright-report/
 # Environment and secrets
 .env
 *.local
+# Written by the Vercel build (infra/vercel/build-keys.mjs); never committed
+services/api/app/_build/
+apps/web/.env.vercel
+# The Vercel CLI's project link and local build output
+.vercel/
 
 # Editors / OS
 .vscode/

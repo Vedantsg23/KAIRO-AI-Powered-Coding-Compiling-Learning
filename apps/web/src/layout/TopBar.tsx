@@ -1,10 +1,11 @@
-import { BookOpenCheck, CircleHelp, Command, Flame, Keyboard, Loader2, Moon, NotebookPen, PanelLeft, PanelRight, Play, Sun } from "lucide-react";
+import { BookOpenCheck, CircleHelp, Command, Flame, Keyboard, Loader2, Moon, NotebookPen, PanelBottom, PanelLeft, PanelRight, Play, Sun } from "lucide-react";
 import { memo } from "react";
 import type { Execution, Language } from "../api/types";
-import { modKey, type Theme } from "../lib/hooks";
+import { altKey, modKey, type Theme } from "../lib/hooks";
 import { Avatar } from "../profile/Avatar";
 import type { Profile } from "../profile/profile";
 import { Button } from "../ui/primitives";
+import { InstallButton, useInstall } from "../pwa/install";
 import { LanguagePicker } from "./LanguagePicker";
 import { KairoLogo, SaarthiMark } from "./Logo";
 
@@ -36,6 +37,8 @@ interface Props {
   /** Desktop panel toggles (absent on small screens). */
   explorer?: { open: boolean; toggle(): void };
   dock?: { open: boolean; toggle(): void };
+  /** The terminal panel under the editor (Ctrl+`). */
+  panel?: { open: boolean; toggle(): void };
   /** The Python notebook (shown here below 1024 px, where the left bar is hidden). */
   notebook?: { open: boolean; toggle(): void };
 }
@@ -73,22 +76,10 @@ const TONE_TEXT = { idle: "text-fg", busy: "text-brand-fg", ok: "text-brand-fg",
  */
 export const TopBar = memo(function TopBar(props: Props) {
   const build = buildState(props.execution, props.stale);
+  const install = useInstall();
   const saarthiWord = props.saarthiStatus === "online" ? "ONLINE" : props.saarthiStatus === "offline" ? "OFFLINE" : "CHECKING";
   return (
     <header className="relative z-30 flex h-[52px] shrink-0 items-center gap-2 border-b border-line bg-surface/90 px-2.5 backdrop-blur-md sm:gap-2.5 sm:px-3">
-      {props.explorer && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={props.explorer.toggle}
-          aria-label={props.explorer.open ? "Hide the explorer" : "Show the explorer"}
-          aria-pressed={props.explorer.open}
-          title="Explorer"
-          className="!h-8 !w-8"
-        >
-          <PanelLeft size={16} />
-        </Button>
-      )}
       <a href="/" className="flex items-center rounded-md pr-1" aria-label="KAIRO home">
         <KairoLogo size={30} animated sub="COMPILER OS" compact />
       </a>
@@ -173,18 +164,41 @@ export const TopBar = memo(function TopBar(props: Props) {
         >
           {props.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </Button>
-        {props.dock && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={props.dock.toggle}
-            aria-label={props.dock.open ? "Hide Saarthi's panel" : "Show Saarthi's panel"}
-            aria-pressed={props.dock.open}
-            title="Saarthi panel"
-            className="max-lg:hidden"
-          >
-            <PanelRight size={16} />
-          </Button>
+        <InstallButton state={install} compact className="max-sm:hidden 2xl:hidden" />
+        <InstallButton state={install} className="max-2xl:hidden" />
+        {(props.explorer || props.panel || props.dock) && (
+          <span className="mx-0.5 flex items-center rounded-md border border-line bg-raised/60 p-0.5 max-lg:hidden" role="group" aria-label="Layout">
+            {props.explorer && (
+              <LayoutToggle
+                open={props.explorer.open}
+                onClick={props.explorer.toggle}
+                label={props.explorer.open ? "Hide the explorer" : "Show the explorer"}
+                title={`Files and examples (${modKey}+B)`}
+                icon={<PanelLeft size={15} />}
+                testId="toggle-explorer"
+              />
+            )}
+            {props.panel && (
+              <LayoutToggle
+                open={props.panel.open}
+                onClick={props.panel.toggle}
+                label={props.panel.open ? "Hide the terminal" : "Show the terminal"}
+                title="Terminal and problems (Ctrl+`)"
+                icon={<PanelBottom size={15} />}
+                testId="toggle-terminal"
+              />
+            )}
+            {props.dock && (
+              <LayoutToggle
+                open={props.dock.open}
+                onClick={props.dock.toggle}
+                label={props.dock.open ? "Hide Saarthi's panel" : "Show Saarthi's panel"}
+                title={`Saarthi chat (${modKey}+${altKey}+B)`}
+                icon={<PanelRight size={15} />}
+                testId="toggle-saarthi"
+              />
+            )}
+          </span>
         )}
         <Button
           variant="primary"
@@ -233,3 +247,20 @@ export const TopBar = memo(function TopBar(props: Props) {
     </header>
   );
 });
+
+/** One of the three layout buttons (side bar, terminal, Saarthi), lit while its part is shown. */
+function LayoutToggle({ open, onClick, label, title, icon, testId }: { open: boolean; onClick(): void; label: string; title: string; icon: React.ReactNode; testId: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={open}
+      title={title}
+      data-testid={testId}
+      className={`grid h-7 w-7 place-items-center rounded transition-colors ${open ? "bg-brand/14 text-brand-fg" : "text-faint hover:bg-fg/6 hover:text-fg"}`}
+    >
+      {icon}
+    </button>
+  );
+}

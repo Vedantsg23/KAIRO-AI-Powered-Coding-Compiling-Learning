@@ -69,6 +69,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/executions/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Execution
+         * @description Queue a compile-and-run and stream its snapshots until it finishes (one request, no WebSocket).
+         */
+        post: operations["run_execution_api_v1_executions_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/executions/{execution_id}": {
         parameters: {
             query?: never;
@@ -183,6 +203,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assistant/ask/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Stream
+         * @description Answer a question, streaming the text while the model writes it (one JSON object per line).
+         */
+        post: operations["ask_stream_api_v1_assistant_ask_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/assistant/complete": {
         parameters: {
             query?: never;
@@ -197,6 +237,23 @@ export interface paths {
          * @description Suggest what comes next at the cursor (the editor shows it as ghost text; Tab accepts).
          */
         post: operations["complete_api_v1_assistant_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/keepalive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Keepalive */
+        get: operations["keepalive_api_v1_system_keepalive_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -227,6 +284,16 @@ export interface components {
             source?: string | null;
             /** History */
             history?: components["schemas"]["ChatTurnIn"][];
+            /**
+             * Evidence
+             * @description The run's sealed evidence from its final snapshot; lets any server instance answer about a run it did not execute. The server checks the seal.
+             */
+            evidence?: string | null;
+            /**
+             * Diagnosticid
+             * @description With executionId: the diagnostic the question is about.
+             */
+            diagnosticId?: string | null;
         };
         /** AskOut */
         AskOut: {
@@ -432,6 +499,11 @@ export interface components {
             diagnostics: components["schemas"]["Diagnostic"][];
             /** Error */
             error?: string | null;
+            /**
+             * Evidence
+             * @description Sealed copy of the finished run (terminal snapshots only); send it with Saarthi requests about this run.
+             */
+            evidence?: string | null;
         };
         /**
          * ExecutionState
@@ -500,6 +572,11 @@ export interface components {
             diagnosticId?: string | null;
             /** Question */
             question?: string | null;
+            /**
+             * Evidence
+             * @description The run's sealed evidence from its final snapshot; lets any server instance answer about a run it did not execute. The server checks the seal.
+             */
+            evidence?: string | null;
         };
         /** ExplanationOut */
         ExplanationOut: {
@@ -558,6 +635,11 @@ export interface components {
             sourceHash: string;
             /** Diagnosticid */
             diagnosticId?: string | null;
+            /**
+             * Evidence
+             * @description The run's sealed evidence from its final snapshot; lets any server instance answer about a run it did not execute. The server checks the seal.
+             */
+            evidence?: string | null;
         };
         /** FixOut */
         FixOut: {
@@ -607,6 +689,11 @@ export interface components {
              * @default false
              */
             cached: boolean;
+            /**
+             * Fixtoken
+             * @description The sealed proposal; send it back to /verify.
+             */
+            fixToken?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -778,6 +865,16 @@ export interface components {
              * @description The run of the patched code.
              */
             executionId: string;
+            /**
+             * Fixtoken
+             * @description FixOut.fixToken of the proposal.
+             */
+            fixToken?: string | null;
+            /**
+             * Evidence
+             * @description The run's sealed evidence from its final snapshot; lets any server instance answer about a run it did not execute. The server checks the seal.
+             */
+            evidence?: string | null;
         };
         /** VerifyOut */
         VerifyOut: {
@@ -877,6 +974,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    run_execution_api_v1_executions_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExecutionCreate"];
+            };
+        };
+        responses: {
+            /** @description One ExecutionOut per line, ending with the terminal one. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/x-ndjson": unknown;
                 };
             };
             /** @description Conflict */
@@ -1289,6 +1447,85 @@ export interface operations {
             };
         };
     };
+    ask_stream_api_v1_assistant_ask_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskIn"];
+            };
+        };
+        responses: {
+            /** @description start, then delta events with the text as it is written, then done (or error). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/x-ndjson": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     complete_api_v1_assistant_complete_post: {
         parameters: {
             query?: never;
@@ -1363,6 +1600,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    keepalive_api_v1_system_keepalive_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

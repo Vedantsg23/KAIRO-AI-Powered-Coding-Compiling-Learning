@@ -228,9 +228,10 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
     flash.current = editor.createDecorationsCollection();
     gutter.current = editor.createDecorationsCollection();
     extra.current = editor.createDecorationsCollection();
-    // Development builds only: lets the end-to-end tests put a large file in
-    // the editor without typing it. Not present in production builds.
-    if (import.meta.env.DEV) (window as unknown as { __kairoEditor?: unknown }).__kairoEditor = editor;
+    // Development builds and the end-to-end test build (VITE_E2E=1) only: lets the
+    // tests put a large file in the editor without typing it. Not present in
+    // production builds.
+    if (import.meta.env.DEV || import.meta.env.VITE_E2E === "1") (window as unknown as { __kairoEditor?: unknown }).__kairoEditor = editor;
 
     modelSub.current = model.onDidChangeContent(() => latest.current.onChange(model.getValue()));
     const cursorSub = editor.onDidChangeCursorPosition((e) =>

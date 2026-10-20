@@ -1,4 +1,4 @@
-import { isMac, modKey } from "../lib/hooks";
+import { altKey, isMac, modKey } from "../lib/hooks";
 import { Dialog, Kbd } from "../ui/primitives";
 
 const SHORTCUTS: [string[], string][] = [
@@ -11,7 +11,11 @@ const SHORTCUTS: [string[], string][] = [
   [[modKey, "F"], "Find in the editor"],
   [["Tab"], "Move between controls (in the editor: indent)"],
   [isMac ? ["Ctrl", "Shift", "M"] : ["Ctrl", "M"], "Let Tab leave the editor (press again to indent with Tab)"],
-  [["←", "→"], "Switch tabs; resize panels when a divider is focused"],
+  [["Ctrl", "`"], "Show or hide the terminal panel (Ctrl+J works too)"],
+  [[modKey, "B"], "Show or hide the explorer"],
+  [[modKey, altKey, "B"], "Show or hide Saarthi's chat panel"],
+  [[modKey, altKey, "I"], "Ask Saarthi: jump to the chat's question box"],
+  [["←", "→"], "Switch tabs; resize panels when a divider is focused (Enter: default size)"],
   [["?"], "Show this list"],
   [["Esc"], "Close dialogs and menus"],
 ];

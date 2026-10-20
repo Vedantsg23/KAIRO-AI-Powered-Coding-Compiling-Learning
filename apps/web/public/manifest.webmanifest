@@ -1,0 +1,22 @@
+{
+  "id": "/",
+  "name": "KAIRO · Code, compile, learn",
+  "short_name": "KAIRO",
+  "description": "An online compiler for 32 languages with live error analysis and Saarthi, an AI guide that explains your errors.",
+  "lang": "en",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#050907",
+  "theme_color": "#0a0a0a",
+  "categories": ["education", "developer", "productivity"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/kairo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

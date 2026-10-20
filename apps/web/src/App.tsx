@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, CircleDashed, FileCode2, Loader2, WifiOff, Zap } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, CircleDashed, FileCode2, Loader2, WifiOff, X, Zap } from "lucide-react";
 import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { ApiError, api } from "./api/client";
 import type { Execution, Language, RawOutputReference } from "./api/types";
@@ -19,7 +19,7 @@ import { formatMs } from "./execution/pipeline";
 import { RunPipeline } from "./execution/RunPipeline";
 import { useExecution } from "./execution/useExecution";
 import { FxContext, useFinePointer } from "./fx/context";
-import { Curtain } from "./fx/Curtain";
+import { StarFlight } from "./fx/Curtain";
 import { MagneticField } from "./fx/MagneticField";
 import { Spot, useSpotlight } from "./fx/pointer";
 import { play, useSound } from "./fx/sound";
@@ -29,6 +29,7 @@ import { KairoMark, SaarthiMark } from "./layout/Logo";
 import { ShortcutsDialog } from "./layout/ShortcutsDialog";
 import { healthView, StatusBar } from "./layout/StatusBar";
 import { TopBar } from "./layout/TopBar";
+import { loadLayout, saveLayout, Workbench, type WorkbenchLayout } from "./layout/Workbench";
 import { applyTextEdits } from "./lib/edits";
 import { sourceHash } from "./lib/hash";
 import { useHealth, useMediaQuery, useTheme, type Theme } from "./lib/hooks";
@@ -45,7 +46,7 @@ import { Companion, useCompanion, type BubbleTone } from "./mascot/Companion";
 import { applyEvent, currentDayStreak, levelFor, loadProgress, saveProgress, type BadgeDef, type ProgressEvent } from "./profile/achievements";
 import { BadgeToast } from "./profile/BadgeToast";
 import { ProfileCard } from "./profile/ProfileCard";
-import type { Profile } from "./profile/profile";
+import { AVATARS, cleanName, EXPERIENCE, type Profile } from "./profile/profile";
 import { Badge, Dot } from "./ui/primitives";
 import { SplitPane } from "./ui/SplitPane";
 import { useToast } from "./ui/Toast";
@@ -64,6 +65,7 @@ import { setCompleter } from "./editor/intellisense/completer";
 import { SaarthiHelloProvider, useSaarthiHello } from "./mascot/SaarthiHello";
 import { doneWelcome, markWelcome, welcomeDue } from "./auth/welcome";
 import { NewPasswordDialog } from "./auth/NewPasswordDialog";
+import { CloudMirror, forgetAccount, hydrate, keysFor, recordRun, saveProfileRow, type SyncStatus } from "./cloud/sync";
 
 migrateLegacyKeys();
 
@@ -81,10 +83,21 @@ function EditorLoading() {
 }
 
 /** Earlier versions stored one input for all languages; now each language has its own. */
-function loadInputs(): Record<string, string> {
-  const stored = load<unknown>("cd.stdin", {});
+function loadInputs(key: string): Record<string, string> {
+  const stored = load<unknown>(key, {});
   if (typeof stored === "string") return { c: stored };
   return stored && typeof stored === "object" ? (stored as Record<string, string>) : {};
+}
+
+/** Where a profile's drafts and inputs live in this browser (an account's are mirrored to the cloud). */
+function storageKeys(profile: Profile) {
+  return profile.kind === "account" ? keysFor(profile.id) : { drafts: "cd.drafts", stdin: "cd.stdin" };
+}
+
+/** A signed-in account's cloud saves, as the workspace sees them. */
+interface CloudControls {
+  status: SyncStatus;
+  flush(): Promise<void>;
 }
 
 /** One empty list for "no live problems", so the markers do not change identity on every keystroke. */
@@ -95,6 +108,10 @@ const ShellContext = createContext<RefObject<HTMLDivElement | null> | null>(null
 
 interface WorkspaceProps {
   profile: Profile;
+  /** Present for signed-in accounts: their work is saved to the cloud. */
+  cloud: CloudControls | null;
+  /** An account changed its name, emblem or level of experience. */
+  onSaveProfile?(profile: Profile): void;
   onSignOut(): void;
   motion: boolean;
   onToggleMotion(): void;
@@ -105,7 +122,7 @@ interface WorkspaceProps {
 // Saarthi greets each profile once per page load.
 const greeted = new Set<string>();
 
-function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggleTheme }: WorkspaceProps) {
+function Workspace({ profile, cloud, onSignOut, motion, onToggleMotion, theme, onToggleTheme }: WorkspaceProps) {
   const toast = useToast();
   const wide = useMediaQuery("(min-width: 1024px)");
   const roomy = useMediaQuery("(min-width: 1280px)");
@@ -139,9 +156,10 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
   useEffect(() => setOpened((all) => (all.includes(activeId) ? all : [...all, activeId])), [activeId]);
 
   // ------------------------------------------------- source, input, drafts
-  const [drafts, setDrafts] = useState<Record<string, string>>(() => load("cd.drafts", {}));
+  const keys = storageKeys(profile);
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => load(keys.drafts, {}));
   const source = drafts[activeId] ?? starterFor(activeId);
-  const [inputs, setInputs] = useState<Record<string, string>>(loadInputs);
+  const [inputs, setInputs] = useState<Record<string, string>>(() => loadInputs(keys.stdin));
   const stdin = inputs[activeId] ?? "";
   const setStdin = useCallback((value: string) => setInputs((all) => ({ ...all, [activeId]: value })), [activeId]);
   const [draftSaved, setDraftSaved] = useState(true);
@@ -170,7 +188,7 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
   );
   useEffect(() => {
     setDraftSaved(false);
-    const timer = setTimeout(() => setDraftSaved(save("cd.drafts", drafts)), 700);
+    const timer = setTimeout(() => setDraftSaved(save(keys.drafts, drafts)), 700);
     return () => clearTimeout(timer);
   }, [drafts]);
   // Ctrl+S saves the draft right away (drafts also save themselves as you
@@ -181,10 +199,11 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
   const saveDraftNow = useCallback(() => {
     const { drafts: all, activeId: id } = draftsRef.current;
     const text = editor.current?.getValue();
-    setDraftSaved(save("cd.drafts", text == null ? all : { ...all, [id]: text }));
-  }, []);
+    setDraftSaved(save(keys.drafts, text == null ? all : { ...all, [id]: text }));
+    void cloud?.flush();
+  }, [keys.drafts, cloud]);
   useEffect(() => {
-    const timer = setTimeout(() => save("cd.stdin", inputs), 500);
+    const timer = setTimeout(() => save(keys.stdin, inputs), 500);
     return () => clearTimeout(timer);
   }, [inputs]);
 
@@ -228,6 +247,24 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
   );
   const [dockOpen, setDockOpen] = useState<boolean>(() => load("k.dock", true));
   useEffect(() => void save("k.dock", dockOpen), [dockOpen]);
+  // The panel under the editor (terminal and problems), as in VS Code: drag its edge to resize it,
+  // maximize it, or hide it with Ctrl+` (it comes back by itself when you press Run).
+  const [panelOpen, setPanelOpen] = useState<boolean>(() => load("k.panel.open", true));
+  useEffect(() => void save("k.panel.open", panelOpen), [panelOpen]);
+  const [panelMax, setPanelMax] = useState(false);
+  const togglePanel = useCallback(() => {
+    setPanelMax(false);
+    setPanelOpen((open) => !open);
+  }, []);
+  const toggleMaximize = useCallback(() => {
+    setPanelOpen(true);
+    setPanelMax((max) => !max);
+  }, []);
+  const [layout, setLayout] = useState<WorkbenchLayout>(loadLayout);
+  const changeLayout = useCallback((next: WorkbenchLayout) => {
+    setLayout(next);
+    saveLayout(next);
+  }, []);
   // The Python notebook takes the editor's place while it is open.
   const [notebookOpen, setNotebookOpen] = useState<boolean>(() => load("k.notebook.open", false));
   useEffect(() => void save("k.notebook.open", notebookOpen), [notebookOpen]);
@@ -392,6 +429,7 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
   const startRun = useCallback(
     async (text: string, input: string) => {
       if (!language || busy) return null;
+      setPanelOpen(true);
       if (isBrowserLanguage(language.id)) {
         // HTML, CSS and React: Run refreshes the preview in the browser.
         setPreviewRun((n) => n + 1);
@@ -414,7 +452,7 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
         } else if (e.status === 413) {
           toast.show({ tone: "error", title: "Too large to run", body: e.message });
         } else if (e.status === 0) {
-          toast.show({ tone: "error", title: "Server unreachable", body: "Start the API (see README) and try again." });
+          toast.show({ tone: "error", title: "Server unreachable", body: e.message });
         } else {
           toast.show({ tone: "error", title: "Could not start the run", body: e.message });
         }
@@ -501,7 +539,7 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
       openSaarthi();
       if (!saarthi.enabled || !execution?.terminal || !currentHash || stale) return;
       if (diagnosticId) setSelectedId(diagnosticId);
-      void saarthi.explain({ executionId: execution.id, sourceHash: currentHash, diagnosticId });
+      void saarthi.explain({ executionId: execution.id, sourceHash: currentHash, diagnosticId, evidence: execution.evidence });
     },
     [openSaarthi, saarthi, execution, currentHash, stale],
   );
@@ -510,7 +548,7 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
       openSaarthi();
       if (!saarthi.enabled || !execution?.terminal || !currentHash || stale) return;
       setSelectedId(diagnosticId);
-      void saarthi.suggestFix({ executionId: execution.id, sourceHash: currentHash, diagnosticId });
+      void saarthi.suggestFix({ executionId: execution.id, sourceHash: currentHash, diagnosticId, evidence: execution.evidence });
     },
     [openSaarthi, saarthi, execution, currentHash, stale],
   );
@@ -543,7 +581,7 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
     if ((expected && expected.executionId === execution.id) || execution.sourceHash === fix.patchedSourceHash) {
       pendingVerify.current = null;
       verifyRequested.current.add(key);
-      void saarthi.verify(fix.fixId, execution.id);
+      void saarthi.verify(fix.fixId, execution.id, execution.evidence);
     }
   }, [execution, saarthi]);
   const undoFix = useCallback(() => {
@@ -643,6 +681,10 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
     const errors = latest.diagnostics.filter((d) => d.severity === "error");
     const succeeded = latest.state === "SUCCEEDED" && errors.length === 0;
     const outcome = record({ type: "run", languageId: latest.languageId, succeeded, usedInput: inputUsed.current.get(latest.id) ?? false });
+    if (cloud && latest.state !== "REJECTED") {
+      const runStep = latest.steps.find((s) => s.kind === "run");
+      void recordRun({ languageId: latest.languageId, state: latest.state, durationMs: runStep?.durationMs ?? runStep?.wallMs ?? null, errors: errors.length });
+    }
     if (latest.state !== "REJECTED") {
       play(succeeded ? "success" : "error");
       if (motion) setSweep({ id: latest.id, ok: succeeded });
@@ -658,7 +700,7 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
         reaction.explain && saarthi.enabled ? { label: "Explain it with Saarthi", onClick: () => explain(firstError) } : undefined,
       );
     }
-  }, [latest, record, say, saarthi.enabled, explain, motion]);
+  }, [latest, record, say, saarthi.enabled, explain, motion, cloud]);
 
   const explained = useRef(new Set<string>());
   const { react } = companion;
@@ -773,13 +815,27 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
         // Ctrl+Shift+X extensions, Ctrl+Shift+E explorer (as in VS Code).
         e.preventDefault();
         selectSideView(e.key.toLowerCase() === "x" ? "extensions" : "explorer");
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.code === "Backquote" || e.key === "`" || e.key.toLowerCase() === "j")) {
+        // Ctrl+` (or Ctrl+J) shows and hides the terminal panel, as in VS Code.
+        e.preventDefault();
+        togglePanel();
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.code === "KeyB" || e.key.toLowerCase() === "b") && wide) {
+        // Ctrl+B: the side bar; Ctrl+Alt+B: Saarthi's panel (VS Code's secondary side bar).
+        e.preventDefault();
+        if (e.altKey) setDockOpen((open) => !open);
+        else toggleExplorer();
+      } else if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && (e.code === "KeyI" || e.key.toLowerCase() === "i")) {
+        // Ctrl+Alt+I: chat with Saarthi (as Copilot Chat in VS Code).
+        e.preventDefault();
+        openSaarthi();
+        window.setTimeout(() => document.getElementById("saarthi-question")?.focus(), 60);
       } else if (e.key === "?" && !typing) {
         setShortcutsOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doRun, explain, selectedDiagnostic, saveNow, openPalette, selectSideView]);
+  }, [doRun, explain, selectedDiagnostic, saveNow, openPalette, selectSideView, togglePanel, toggleExplorer, wide, openSaarthi]);
 
   // -------------------------------------------------------------- layout
   const saarthiStatus: "checking" | "online" | "offline" =
@@ -803,9 +859,34 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
   const toggleDock = useCallback(() => setDockOpen((o) => !o), []);
   const explorerControl = useMemo(() => (wide ? { open: explorerOpen, toggle: toggleExplorer } : undefined), [wide, explorerOpen, toggleExplorer]);
   const dockControl = useMemo(() => (wide ? { open: dockOpen, toggle: toggleDock } : undefined), [wide, dockOpen, toggleDock]);
+  const panelControl = useMemo(() => (wide ? { open: panelOpen, toggle: togglePanel } : undefined), [wide, panelOpen, togglePanel]);
   const notebooksOn = ext("notebooks");
   const notebookControl = useMemo(() => (notebooksOn ? { open: notebookOpen, toggle: toggleNotebook } : undefined), [notebooksOn, notebookOpen, toggleNotebook]);
 
+  const panelActions = (
+    <span className="flex shrink-0 items-center gap-0.5" data-testid="panel-actions">
+      <button
+        type="button"
+        onClick={toggleMaximize}
+        aria-label={panelMax ? "Restore the terminal size" : "Maximize the terminal"}
+        title={panelMax ? "Restore panel size" : "Maximize panel size"}
+        className="grid h-6 w-6 place-items-center rounded text-faint transition-colors hover:bg-fg/8 hover:text-fg"
+        data-testid="panel-maximize"
+      >
+        {panelMax ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+      </button>
+      <button
+        type="button"
+        onClick={togglePanel}
+        aria-label="Hide the terminal"
+        title="Hide the panel (Ctrl+`)"
+        className="grid h-6 w-6 place-items-center rounded text-faint transition-colors hover:bg-fg/8 hover:text-fg"
+        data-testid="panel-close"
+      >
+        <X size={14} />
+      </button>
+    </span>
+  );
   const problemsPanel = (bare = false) => (
     <ProblemsPanel
       execution={execution}
@@ -824,6 +905,7 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
       onFix={suggestFix}
       onApplyLiveFix={(problem) => applyLiveFix(problem, false)}
       bare={bare}
+      actions={bare ? undefined : panelActions}
     />
   );
   const saarthiPanel = (
@@ -1024,9 +1106,6 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
     </div>
   ) : null;
 
-  const center = notebook ?? (
-    <SplitPane orientation="vertical" storageKey="k.split.bottom" initial={0.6} min={0.28} max={0.84} label="Resize the terminal" first={editorCard} second={bottom} />
-  );
 
   const dock = (
     <div className={`k-panel h-full ${enter(4).className}`} style={enter(4).style} data-tour="saarthi">
@@ -1112,6 +1191,7 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
         onProfile={openProfile}
         explorer={explorerControl}
         dock={dockControl}
+        panel={panelControl}
         notebook={notebookControl}
       />
       {apiDown && (
@@ -1122,48 +1202,60 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
       )}
       <main className="min-h-0 flex-1 p-2">
         {wide ? (
-          <div className="flex h-full min-h-0 gap-0">
-            <ActivityRail
-              view={sideView}
-              open={explorerOpen}
-              onSelect={selectSideView}
-              extensionsOn={extensionsOn}
-              onNotebook={ext("notebooks") ? toggleNotebook : undefined}
-              notebookOpen={notebookOpen}
-            />
-            {explorerOpen && (
-              <div className={`mr-2 w-[248px] shrink-0 ${enter(0).className}`} style={enter(0).style}>
-                {sideView === "extensions" ? (
-                  <ExtensionsView
-                    extensions={extensions}
-                    languageId={activeId}
-                    languageName={language?.displayName ?? ""}
-                    serverUp={health.kind === "up"}
-                  />
-                ) : (
-                  <Explorer
-                    languages={offered}
-                    language={language}
-                    draftIds={draftIds}
-                    onOpenLanguage={changeLanguage}
-                    inputLines={inputLines}
-                    onOpenInput={openInput}
-                    onLoadExample={loadExample}
-                    onOpenExamples={openExamples}
-                    busy={busy}
-                    system={systemStatus}
-                  />
-                )}
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              {dockOpen ? (
-                <SplitPane storageKey="k.split.dock" initial={0.71} min={0.5} max={0.8} label="Resize Saarthi's panel" first={center} second={dock} />
-              ) : (
-                center
-              )}
-            </div>
-          </div>
+          <Workbench
+            rail={
+              <ActivityRail
+                view={sideView}
+                open={explorerOpen}
+                onSelect={selectSideView}
+                extensionsOn={extensionsOn}
+                onNotebook={ext("notebooks") ? toggleNotebook : undefined}
+                notebookOpen={notebookOpen}
+              />
+            }
+            sidebar={
+              explorerOpen ? (
+                <div className={`h-full ${enter(0).className}`} style={enter(0).style}>
+                  {sideView === "extensions" ? (
+                    <ExtensionsView
+                      extensions={extensions}
+                      languageId={activeId}
+                      languageName={language?.displayName ?? ""}
+                      serverUp={health.kind === "up"}
+                    />
+                  ) : (
+                    <Explorer
+                      languages={offered}
+                      language={language}
+                      draftIds={draftIds}
+                      onOpenLanguage={changeLanguage}
+                      inputLines={inputLines}
+                      onOpenInput={openInput}
+                      onLoadExample={loadExample}
+                      onOpenExamples={openExamples}
+                      busy={busy}
+                      system={systemStatus}
+                    />
+                  )}
+                </div>
+              ) : null
+            }
+            editor={notebook ?? editorCard}
+            panel={!notebook && panelOpen ? bottom : null}
+            panelMaximized={panelMax}
+            secondary={dockOpen ? dock : null}
+            layout={layout}
+            onLayout={changeLayout}
+            onCollapse={(which) => {
+              if (which === "sidebar") {
+                setExplorerPref(false);
+                save("k.explorer", false);
+              } else if (which === "panel") {
+                setPanelOpen(false);
+                setPanelMax(false);
+              } else setDockOpen(false);
+            }}
+          />
         ) : (
           notebook ?? (
             <div className="flex h-full flex-col gap-2 overflow-y-auto">
@@ -1182,6 +1274,7 @@ function Workspace({ profile, onSignOut, motion, onToggleMotion, theme, onToggle
         onShortcuts={openShortcuts}
         saarthiStatus={saarthiStatus}
         languages={readyCount}
+        cloud={cloud?.status ?? null}
       />
 
       {/* Dialogs are mounted only while open: closed, they cost nothing on the renders that follow typing. */}
@@ -1318,13 +1411,103 @@ function runReaction(
   }
 }
 
-function Opening() {
+function Opening({ text = "Starting KAIRO..." }: { text?: string }) {
   return (
-    <div className="relative z-10 flex h-full flex-col items-center justify-center gap-3 font-mono text-xs uppercase tracking-[0.14em] text-muted">
+    <div className="relative z-10 flex h-full flex-col items-center justify-center gap-3 font-mono text-xs uppercase tracking-[0.14em] text-muted" data-testid="opening">
       <KairoMark size={52} animated />
-      Starting KAIRO...
+      {text}
     </div>
   );
+}
+
+/**
+ * A signed-in account's cloud saves: pull and merge them before the
+ * workspace opens, then mirror changes while it is open (see cloud/sync.ts).
+ * Returns the account's profile as saved in the cloud (name, avatar, level of
+ * experience) and the controls the workspace uses; `ready` is false while
+ * the account is loading.
+ */
+function useAccountCloud(profile: Profile | null) {
+  const toast = useToast();
+  const accountId = profile?.kind === "account" ? profile.id : null;
+  const [ready, setReady] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ name?: string; avatar?: string; experience?: string } | null>(null);
+  const [status, setStatus] = useState<SyncStatus>("off");
+  const mirror = useRef<CloudMirror | null>(null);
+
+  useEffect(() => {
+    if (!accountId) {
+      setReady(null);
+      setStatus("off");
+      return;
+    }
+    let cancelled = false;
+    let stop: (() => void) | null = null;
+    setStatus("loading");
+    hydrate(accountId)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.profile) {
+          save(`cd.avatar.${accountId}`, result.profile.avatar);
+          save(`cd.experience.${accountId}`, result.profile.experience);
+          setSaved({ name: result.profile.displayName, avatar: result.profile.avatar, experience: result.profile.experience });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) toast.show({ tone: "error", title: "Working offline", body: "Your saved work could not be loaded right now. Changes stay in this browser and are saved to your account when the connection is back." });
+      })
+      .finally(() => {
+        if (cancelled) return;
+        const m = new CloudMirror(accountId);
+        mirror.current = m;
+        const unsubscribe = m.subscribe(setStatus);
+        const end = m.start();
+        stop = () => {
+          unsubscribe();
+          end();
+        };
+        setReady(accountId);
+      });
+    return () => {
+      cancelled = true;
+      stop?.();
+      mirror.current = null;
+    };
+  }, [accountId, toast]);
+
+  const controls = useMemo<CloudControls | null>(
+    () => (accountId && ready === accountId ? { status, flush: () => mirror.current?.flush() ?? Promise.resolve() } : null),
+    [accountId, ready, status],
+  );
+  const merged = useMemo<Profile | null>(() => {
+    if (!profile || profile.kind !== "account" || !saved) return profile;
+    const avatar = AVATARS.some((a) => a.id === saved.avatar) ? (saved.avatar as Profile["avatar"]) : profile.avatar;
+    const experience = EXPERIENCE.some((e) => e.id === saved.experience) ? (saved.experience as Profile["experience"]) : profile.experience;
+    return { ...profile, name: cleanName(saved.name ?? "") || profile.name, avatar, experience };
+  }, [profile, saved]);
+
+  /** Upload what is left, then remove the account's copies from this browser. */
+  const leave = useCallback(async () => {
+    if (!accountId) return;
+    try {
+      await Promise.race([mirror.current?.flush(), new Promise((r) => setTimeout(r, 4000))]);
+    } finally {
+      forgetAccount(accountId);
+    }
+  }, [accountId]);
+
+  const saveProfile = useCallback(
+    (next: Profile) => {
+      if (!accountId) return;
+      setSaved({ name: next.name, avatar: next.avatar, experience: next.experience });
+      save(`cd.avatar.${accountId}`, next.avatar);
+      save(`cd.experience.${accountId}`, next.experience);
+      void saveProfileRow(accountId, next).catch(() => undefined);
+    },
+    [accountId],
+  );
+
+  return { loading: !!accountId && ready !== accountId, profile: merged, controls, leave, saveProfile };
 }
 
 /**
@@ -1336,6 +1519,7 @@ export function App() {
   const [theme, toggleTheme] = useTheme();
   const fine = useFinePointer();
   const auth = useAuth();
+  const account = useAccountCloud(auth.profile);
   const shell = useRef<HTMLDivElement>(null);
   const [curtain, setCurtain] = useState(false);
   // "on" while the boot sequence covers the screen, "leaving" while it fades out.
@@ -1356,12 +1540,16 @@ export function App() {
         <CelebrateProvider enabled={motion}>
           {boot === "on" ? null : !auth.ready ? (
             <Opening />
-          ) : auth.profile ? (
+          ) : account.loading ? (
+            <Opening text="Loading your saved work..." />
+          ) : account.profile ? (
             <ShellContext.Provider value={shell}>
               <Workspace
-                key={auth.profile.id}
-                profile={auth.profile}
-                onSignOut={() => void auth.signOut()}
+                key={account.profile.id}
+                profile={account.profile}
+                cloud={account.controls}
+                onSaveProfile={account.saveProfile}
+                onSignOut={() => void account.leave().finally(() => void auth.signOut())}
                 motion={motion}
                 onToggleMotion={toggleMotion}
                 theme={theme}
@@ -1384,7 +1572,7 @@ export function App() {
         </CelebrateProvider>
         </SaarthiHelloProvider>
         {motion && fine && <MagneticField />}
-        {curtain && <Curtain onDone={endCurtain} />}
+        {curtain && <StarFlight onDone={endCurtain} />}
         {auth.recovery && <NewPasswordDialog onDone={auth.endRecovery} />}
         {boot !== "off" && <BootSequence motion={motion} onLeave={() => setBoot("leaving")} onDone={() => setBoot("off")} />}
       </div>

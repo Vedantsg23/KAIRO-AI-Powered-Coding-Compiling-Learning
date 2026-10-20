@@ -18,6 +18,18 @@ const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VI
 
 export const authConfigured = Boolean(url && key);
 
+/**
+ * Sign-in methods besides email and password, each switched on in the Supabase
+ * project first: VITE_AUTH_PROVIDERS=google,github,azure,phone. Unset, the
+ * entry page offers email and password only (they need no extra setup).
+ */
+export const authProviders = new Set(
+  (import.meta.env.VITE_AUTH_PROVIDERS ?? "")
+    .split(",")
+    .map((name: string) => name.trim().toLowerCase())
+    .filter(Boolean),
+);
+
 let client: Promise<SupabaseClient> | null = null;
 
 function supabase(): Promise<SupabaseClient> {
@@ -29,6 +41,9 @@ function supabase(): Promise<SupabaseClient> {
   );
   return client;
 }
+
+/** The signed-in Supabase client (for the account's cloud saves, see cloud/sync.ts). */
+export const getClient = supabase;
 
 /** Google, GitHub and Microsoft (Supabase calls it "azure"); each must be enabled in the Supabase project. */
 export type OAuthProvider = "google" | "github" | "azure";

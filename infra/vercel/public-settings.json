@@ -1,0 +1,5 @@
+{
+  "_about": "Public settings of the live site (https://kairo-ai-phi.vercel.app). The Vercel build turns them into apps/web/.env.vercel (infra/vercel/build-keys.mjs) for the web app, and the API reads that file on Vercel for the daily keep-alive. Both values are public by design: the publishable key is meant for browsers, and Row Level Security protects every account's data (supabase/migrations). Never put a secret or service_role key here. A Vercel environment variable with the same name wins.",
+  "VITE_SUPABASE_URL": "https://pmhtluhjhlknmijomixa.supabase.co",
+  "VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_WUheAyDRUdT2L6_cFNevKQ_hcWzo1Hi"
+}

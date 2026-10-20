@@ -77,7 +77,8 @@ test("live check latency on 500-line files (measured, reported)", async ({ page,
     await page.waitForTimeout(400);
     const before = await samples(page);
     // Edit the last line: add and remove a character, 10 times each.
-    await page.locator(".monaco-editor .view-lines").click();
+    // Click the first visible line: the middle of a 500-line file's lines is far below the editor.
+    await page.locator(".monaco-editor .view-lines").click({ position: { x: 40, y: 8 } });
     await page.keyboard.press("Control+End");
     for (let i = 0; i < 20; i++) {
       const count = await samples(page);

@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { api, ApiError, watchExecution } from "../api/client";
+import { api, ApiError } from "../api/client";
 import type { Category, Execution } from "../api/types";
 import { Markdown } from "../assistant/Markdown";
 import { noteFor } from "../diagnostics/notes";
@@ -94,16 +94,16 @@ function loadNotebook(key: string): Notebook {
 
 const maxCount = (nb: Notebook) => nb.cells.reduce((n, c) => Math.max(n, c.count ?? 0), 0);
 
-/** Wait for an execution to finish (WebSocket, with polling as the fallback). */
-function follow(id: string, stops: Set<() => void>): Promise<Execution> {
-  return new Promise((resolve) => {
-    const stop = watchExecution(id, (execution) => {
-      if (!execution.terminal) return;
-      stops.delete(stop);
-      resolve(execution);
-    });
-    stops.add(stop);
-  });
+/** Run the notebook's program and wait for the result (one streamed request); unmounting stops waiting. */
+async function runToEnd(body: { languageId: string; source: string; stdin: string }, stops: Set<() => void>): Promise<Execution> {
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  stops.add(stop);
+  try {
+    return await api.runStream(body, undefined, controller.signal);
+  } finally {
+    stops.delete(stop);
+  }
 }
 
 let logSeq = 1;
@@ -306,8 +306,7 @@ export function NotebookView({ storageKey, theme, fontSize, available, saarthi, 
       setBanner(null);
       setRunning({ ids: consoleLine !== undefined ? [] : ran.map((r) => r.id), console: consoleLine !== undefined });
       try {
-        const created = await api.createExecution({ languageId: "notebook", source: runSource(sources), stdin });
-        const final = created.terminal ? created : await follow(created.id, stops.current);
+        const final = await runToEnd({ languageId: "notebook", source: runSource(sources), stdin }, stops.current);
         const step = final.steps.find((s) => s.kind === "run");
         const outputs = parseRun(step?.stdout ?? "", step?.stderr ?? "");
         const truncated = !!(step?.stdoutTruncated || step?.stderrTruncated);
@@ -366,7 +365,7 @@ export function NotebookView({ storageKey, theme, fontSize, available, saarthi, 
         });
         addLog({ kind: "run", title: ran.length === 1 ? "Run cell 1" : `Run cells 1–${ran.length}`, lines });
       } catch (error) {
-        const message = error instanceof ApiError ? error.message : "Cannot reach the server. Is the API running?";
+        const message = error instanceof ApiError ? error.message : "Cannot reach the server. Check your connection and try again.";
         setBanner(message);
         addLog({ kind: "info", title: "Run failed", lines: [{ text: message, tone: "bad" }] });
       } finally {

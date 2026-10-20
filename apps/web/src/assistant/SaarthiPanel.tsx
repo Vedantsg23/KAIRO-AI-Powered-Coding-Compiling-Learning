@@ -2,14 +2,18 @@ import {
   AlertTriangle,
   BadgeCheck,
   BookOpen,
+  Check,
   CircleSlash,
+  Copy,
   Crosshair,
   Loader2,
+  MessageSquarePlus,
   Play,
   RotateCcw,
   Send,
   ShieldAlert,
   Sparkles,
+  Square,
   Undo2,
   Wand2,
   Wrench,
@@ -127,15 +131,22 @@ export function SaarthiPanel(props: Props) {
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   }, [saarthi.chat.length, saarthi.explanation, saarthi.fix, saarthi.verdict]);
+  // While an answer is being written, keep its newest line in view (unless the student scrolled up to read).
+  const streamingText = saarthi.chat.find((m) => m.streaming)?.content.length ?? 0;
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !streamingText) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
+  }, [streamingText]);
 
   const explain = () =>
     execution &&
     props.currentHash &&
-    void saarthi.explain({ executionId: execution.id, sourceHash: props.currentHash, diagnosticId: focus?.id ?? null });
+    void saarthi.explain({ executionId: execution.id, sourceHash: props.currentHash, diagnosticId: focus?.id ?? null, evidence: execution.evidence });
   const suggest = () =>
     execution &&
     props.currentHash &&
-    void saarthi.suggestFix({ executionId: execution.id, sourceHash: props.currentHash, diagnosticId: focus?.id ?? null });
+    void saarthi.suggestFix({ executionId: execution.id, sourceHash: props.currentHash, diagnosticId: focus?.id ?? null, evidence: execution.evidence });
 
   const stage = loopStage(props, !!focus && focus.severity !== "info" && canUseRun);
   // A current run with problems comes first; otherwise the live analyzer (about the code as it is now).
@@ -208,7 +219,7 @@ export function SaarthiPanel(props: Props) {
               </p>
             )}
             {saarthi.enabled && focus && canUseRun && (
-              <p className="mt-2 text-[10.5px] text-faint">Tip: select a problem in Diagnostics, or press {modKey}+Shift+Enter in the editor.</p>
+              <p className="mt-2 text-[10.5px] text-faint">Tip: select a problem under Problems, or press {modKey}+Shift+Enter in the editor.</p>
             )}
           </div>
         </div>
@@ -229,6 +240,18 @@ export function SaarthiPanel(props: Props) {
             AI guide · grounded in your run{saarthi.status?.model ? ` · ${saarthi.status.model}` : ""}
           </p>
         </div>
+        {saarthi.chat.length > 0 && (
+          <button
+            type="button"
+            onClick={saarthi.newChat}
+            title="Start a new chat"
+            aria-label="New chat"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-fg/6 hover:text-fg"
+            data-testid="saarthi-new-chat"
+          >
+            <MessageSquarePlus size={15} />
+          </button>
+        )}
         <span
           className={`flex items-center gap-1.5 rounded border px-1.5 py-0.5 font-mono text-[9.5px] font-bold uppercase tracking-[0.1em] ${
             saarthi.enabled ? "border-ai/40 bg-ai/10 text-ai-fg" : "border-warn/40 bg-warn/12 text-warn-fg"
@@ -312,14 +335,19 @@ export function SaarthiPanel(props: Props) {
 
       <AskBox
         busy={saarthi.pending === "ask"}
+        streaming={saarthi.chat.some((m) => m.streaming)}
+        onStop={saarthi.stop}
         grounding={canUseRun ? "run" : "code"}
         offline={!saarthi.enabled}
-        onAsk={(question) =>
+        suggestions={saarthi.chat.length === 0 ? suggestions({ focus: canUseRun ? focus : null, languageName, concept: props.concept, hasRun: canUseRun }) : []}
+        onAsk={(question, diagnosticId) =>
           saarthi.ask(
             {
               question,
               languageId: language?.id ?? "",
-              ...(canUseRun ? { executionId: execution!.id, sourceHash: props.currentHash } : { source: props.source }),
+              ...(canUseRun
+                ? { executionId: execution!.id, sourceHash: props.currentHash, evidence: execution!.evidence, diagnosticId: diagnosticId ?? null }
+                : { source: props.source }),
             },
             () => ({
               languageId: language?.id ?? "",
@@ -885,29 +913,50 @@ function FixCard(props: Props) {
 
 function ChatThread({ saarthi }: { saarthi: SaarthiApi }) {
   if (saarthi.chat.length === 0) return null;
+  const waiting = saarthi.pending === "ask" && !saarthi.chat.some((m) => m.streaming) && saarthi.chat[saarthi.chat.length - 1]?.role === "user";
   return (
-    <ol className="flex flex-col gap-2.5" aria-label="Conversation with Saarthi" data-testid="saarthi-chat">
-      {saarthi.chat.map((m, i) => (
-        <li
-          key={i}
-          className={`max-w-[92%] rounded-md px-3 py-2 ${
-            m.role === "user"
-              ? "ml-auto border border-brand/30 bg-brand/10 text-[13px] text-fg"
-              : m.error
-                ? "border border-danger/30 bg-danger/10 text-[13px] text-fg"
-                : "cd-ai-border"
-          }`}
-        >
-          {m.role === "assistant" && !m.error ? <Markdown text={m.content} /> : m.content}
-          {m.role === "assistant" && m.grounded && m.grounded !== "none" && (
-            <p className="mt-1 font-mono text-[10px] text-faint">based on your {m.grounded === "execution" ? "last run" : "current code"} · AI answer, check by running</p>
-          )}
-          {m.role === "assistant" && m.offline && (
-            <p className="mt-1 font-mono text-[10px] text-faint" data-testid="offline-answer">offline Saarthi · built-in knowledge · check by running</p>
-          )}
-        </li>
-      ))}
-      {saarthi.pending === "ask" && (
+    <ol className="flex flex-col gap-3" aria-label="Conversation with Saarthi" data-testid="saarthi-chat" aria-live="polite">
+      {saarthi.chat.map((m) =>
+        m.role === "user" ? (
+          <li key={m.id} className="k-chat-in ml-auto max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-brand/30 bg-brand/10 px-3 py-2 text-[13px] text-fg">
+            {m.content}
+          </li>
+        ) : (
+          <li key={m.id} className="k-chat-in flex max-w-full gap-2" data-streaming={m.streaming || undefined}>
+            <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border border-ai/40 bg-ai/12 font-mono text-[10px] font-bold text-ai-fg" aria-hidden>
+              S
+            </span>
+            <div className={`min-w-0 flex-1 rounded-2xl rounded-tl-md px-3 py-2 ${m.error ? "border border-danger/30 bg-danger/10 text-[13px] text-fg" : "cd-ai-border"}`}>
+              <p className="mb-0.5 flex items-center gap-2 font-mono text-[9.5px] font-bold uppercase tracking-[0.1em] text-ai-fg">
+                Saarthi
+                {m.streaming && <span className="font-normal normal-case tracking-normal text-faint">writing...</span>}
+                {m.stopped && <span className="font-normal normal-case tracking-normal text-faint">stopped</span>}
+                {!m.streaming && !m.error && m.content && <CopyButton text={m.content} />}
+              </p>
+              {m.error ? (
+                m.content
+              ) : m.content ? (
+                <div className={m.streaming ? "k-streaming" : undefined}>
+                  <Markdown text={m.content} />
+                </div>
+              ) : (
+                <span className="k-typing" aria-label="Saarthi is thinking">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              )}
+              {!m.streaming && m.grounded && m.grounded !== "none" && (
+                <p className="mt-1 font-mono text-[10px] text-faint">based on your {m.grounded === "execution" ? "last run" : "current code"} · AI answer, check by running</p>
+              )}
+              {m.offline && (
+                <p className="mt-1 font-mono text-[10px] text-faint" data-testid="offline-answer">offline Saarthi · built-in knowledge · check by running</p>
+              )}
+            </div>
+          </li>
+        ),
+      )}
+      {waiting && (
         <li className="flex items-center gap-2 text-xs text-muted">
           <Loader2 size={13} className="animate-spin text-ai-fg" /> Saarthi is thinking...
         </li>
@@ -916,8 +965,130 @@ function ChatThread({ saarthi }: { saarthi: SaarthiApi }) {
   );
 }
 
-function AskBox({ busy, grounding, offline, onAsk }: { busy: boolean; grounding: "run" | "code"; offline: boolean; onAsk(question: string): void }) {
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(
+          () => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1400);
+          },
+          () => undefined,
+        );
+      }}
+      className="ml-auto rounded p-0.5 text-faint transition-colors hover:bg-fg/8 hover:text-fg"
+      aria-label={copied ? "Copied" : "Copy the answer"}
+      title={copied ? "Copied" : "Copy"}
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+    </button>
+  );
+}
+
+interface Suggestion {
+  label: string;
+  question: string;
+  diagnosticId?: string;
+}
+
+/** Questions a beginner can send with one click, chosen from what is on screen. */
+function suggestions({ focus, languageName, concept, hasRun }: { focus: Diagnostic | null; languageName: string; concept: ConceptInfo | null; hasRun: boolean }): Suggestion[] {
+  const list: Suggestion[] = [];
+  if (focus && focus.severity !== "info") {
+    const where = focus.range ? ` on line ${focus.range.startLine}` : "";
+    list.push({ label: "Explain this error", question: `Explain the ${focus.severity}${where}: what does it mean and why did it happen?`, diagnosticId: focus.id });
+    list.push({ label: "Give me a hint", question: `Give me a hint to fix the ${focus.severity}${where}, without writing the whole answer.`, diagnosticId: focus.id });
+  } else if (hasRun) {
+    list.push({ label: "What does my code do?", question: "Explain what my program does, step by step." });
+    list.push({ label: "How can I improve it?", question: "How can I make this program clearer or faster?" });
+  } else {
+    list.push({ label: "What does my code do?", question: "Explain what my code does, step by step." });
+  }
+  const topic = concept?.path[concept.path.length - 1];
+  if (topic) list.push({ label: `Explain ${topic}`, question: `Explain ${topic} in ${languageName} with a small example.` });
+  list.push({ label: `Input in ${languageName}`, question: `How do I read input from the user in ${languageName}?` });
+  return list.slice(0, 4);
+}
+
+/** Example prompts typed into the empty box one after another (a hint of what to ask). */
+const PROMPTS = ["Why does my program crash?", "Explain this error in simple words", "What is a pointer?", "How do loops work?", "Give me a hint, not the answer"];
+
+function useTypedPrompt(active: boolean): string {
   const [text, setText] = useState("");
+  useEffect(() => {
+    if (!active || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setText("");
+      return;
+    }
+    let prompt = 0;
+    let chars = 0;
+    let deleting = false;
+    let timer = 0;
+    const tick = () => {
+      // Decoration: it stands still with Animations off and while the student types,
+      // so every frame goes to the editor and the live check.
+      const app = document.querySelector<HTMLElement>(".cd-app");
+      if (app?.dataset.motion === "off") {
+        setText("");
+        timer = window.setTimeout(tick, 1500);
+        return;
+      }
+      if (app?.dataset.typing === "true") {
+        timer = window.setTimeout(tick, 700);
+        return;
+      }
+      const target = PROMPTS[prompt];
+      if (!deleting) {
+        chars++;
+        setText(target.slice(0, chars));
+        if (chars >= target.length) {
+          deleting = true;
+          timer = window.setTimeout(tick, 1800);
+          return;
+        }
+        timer = window.setTimeout(tick, 45 + Math.random() * 40);
+      } else {
+        chars -= 2;
+        setText(target.slice(0, Math.max(0, chars)));
+        if (chars <= 0) {
+          deleting = false;
+          chars = 0;
+          prompt = (prompt + 1) % PROMPTS.length;
+          timer = window.setTimeout(tick, 400);
+          return;
+        }
+        timer = window.setTimeout(tick, 22);
+      }
+    };
+    timer = window.setTimeout(tick, 900);
+    return () => window.clearTimeout(timer);
+  }, [active]);
+  return text;
+}
+
+function AskBox({
+  busy,
+  streaming,
+  onStop,
+  grounding,
+  offline,
+  suggestions: chips,
+  onAsk,
+}: {
+  busy: boolean;
+  streaming: boolean;
+  onStop(): void;
+  grounding: "run" | "code";
+  offline: boolean;
+  suggestions: Suggestion[];
+  onAsk(question: string, diagnosticId?: string): void;
+}) {
+  const [text, setText] = useState("");
+  const [focused, setFocused] = useState(false);
+  const typed = useTypedPrompt(!focused && !text);
   const send = () => {
     const question = text.trim();
     if (!question || busy) return;
@@ -932,17 +1103,32 @@ function AskBox({ busy, grounding, offline, onAsk }: { busy: boolean; grounding:
         send();
       }}
     >
-      <div className="flex items-end gap-2 rounded-md border border-line-strong bg-surface p-1.5 focus-within:border-ai focus-within:ring-2 focus-within:ring-ai/20">
+      {chips.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5" data-testid="saarthi-suggestions">
+          {chips.map((chip) => (
+            <button
+              key={chip.label}
+              type="button"
+              disabled={busy}
+              onClick={() => onAsk(chip.question, chip.diagnosticId)}
+              className="k-chip-suggest rounded-full border border-ai/35 bg-ai/8 px-2.5 py-1 text-[11.5px] font-medium text-fg transition-colors hover:border-ai/70 hover:bg-ai/15 disabled:opacity-50"
+            >
+              <Sparkles size={11} className="mr-1 inline text-ai-fg" />
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex items-end gap-2 rounded-xl border border-line-strong bg-surface p-1.5 transition-shadow focus-within:border-ai focus-within:ring-2 focus-within:ring-ai/20">
         <label htmlFor="saarthi-question" className="sr-only">
           Ask Saarthi
         </label>
-        <span className="select-none pb-1 pl-1 font-mono text-[12px] font-bold text-ai-fg" aria-hidden>
-          &gt;
-        </span>
         <textarea
           id="saarthi-question"
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -952,23 +1138,31 @@ function AskBox({ busy, grounding, offline, onAsk }: { busy: boolean; grounding:
           rows={2}
           maxLength={2000}
           placeholder={
-            offline
-              ? "Ask Saarthi: why does my code fail? · explain pointers · how do I read input?"
-              : grounding === "run"
-                ? "Ask about this run, e.g. why does line 7 fail?"
-                : "Ask about your code or a concept"
+            typed
+              ? `${typed}▍`
+              : offline
+                ? "Ask Saarthi: why does my code fail? · explain pointers · how do I read input?"
+                : grounding === "run"
+                  ? "Ask about this run, e.g. why does line 7 fail?"
+                  : "Ask about your code or a concept"
           }
-          className="max-h-32 min-h-10 flex-1 resize-none bg-transparent px-1 py-1 text-[13px] text-fg outline-none placeholder:text-faint"
+          className="max-h-32 min-h-10 flex-1 resize-none bg-transparent px-1.5 py-1 text-[13px] text-fg outline-none placeholder:text-faint"
           data-testid="saarthi-input"
         />
-        <Button type="submit" variant="ai" size="sm" disabled={busy || !text.trim()} aria-label="Send question">
-          {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-        </Button>
+        {streaming ? (
+          <Button type="button" variant="ai" size="sm" onClick={onStop} aria-label="Stop the answer" title="Stop" data-testid="saarthi-stop">
+            <Square size={12} fill="currentColor" />
+          </Button>
+        ) : (
+          <Button type="submit" variant="ai" size="sm" disabled={busy || !text.trim()} aria-label="Send question">
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+          </Button>
+        )}
       </div>
       <p className="mt-1 px-1 text-[10px] text-faint">
         {offline
           ? "Offline mode: answered in your browser from KAIRO's built-in knowledge and the live analysis. Nothing is sent anywhere."
-          : `Sent only when you press Enter. Saarthi sees your ${grounding === "run" ? "last run (code, problems, output)" : "current code"}.`}
+          : `Enter sends, Shift+Enter adds a line. Saarthi sees your ${grounding === "run" ? "last run (code, problems, output)" : "current code"}.`}
       </p>
     </form>
   );

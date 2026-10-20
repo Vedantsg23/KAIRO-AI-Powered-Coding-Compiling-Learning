@@ -17,8 +17,12 @@ interface Props {
   tab: OutputTab;
   onTabChange(tab: OutputTab): void;
   highlight: RawOutputReference | null;
-  /** Extra tabs placed before these (used on small screens). */
+  /** Extra tabs placed before these (used on small screens), or after `extraAfter`. */
   extraTabs?: { id: string; label: ReactNode; badge?: ReactNode; testId?: string; tour?: string }[];
+  /** Put the extra tabs right after this tab instead of first (the desktop panel: Terminal, Problems, ...). */
+  extraAfter?: OutputTab;
+  /** Shown above the program's output in the Terminal tab (the run's stages). */
+  terminalHeader?: ReactNode;
   /** Shown at the right end of the tab bar (Saarthi's companion on wide screens). */
   right?: ReactNode;
   extraContent?: ReactNode;
@@ -43,8 +47,7 @@ export const OutputPanel = memo(function OutputPanel(props: Props) {
   const inputLines = stdin ? stdin.replace(/\n$/, "").split("\n").length : 0;
   const extraActive = props.extraSelected ?? null;
 
-  const tabs = props.onlyExtraTabs ? [...(props.extraTabs ?? [])] : [
-    ...(props.extraTabs ?? []),
+  const own = [
     { id: "output", label: <><Terminal size={13} /> Terminal</>, testId: "tab-output" },
     {
       id: "input",
@@ -60,6 +63,13 @@ export const OutputPanel = memo(function OutputPanel(props: Props) {
     },
     { id: "details", label: <><Gauge size={13} /> Details</>, testId: "tab-details" },
   ];
+  const extra = props.extraTabs ?? [];
+  const after = props.extraAfter ? own.findIndex((t) => t.id === props.extraAfter) : -1;
+  const tabs = props.onlyExtraTabs
+    ? [...extra]
+    : after >= 0
+      ? [...own.slice(0, after + 1), ...extra, ...own.slice(after + 1)]
+      : [...extra, ...own];
   const value = extraActive ?? tab;
 
   return (
@@ -82,7 +92,14 @@ export const OutputPanel = memo(function OutputPanel(props: Props) {
         {extraActive && props.extraContent}
         {!extraActive && tab === "input" && <InputTab stdin={stdin} onChange={props.onStdinChange} languageId={language?.id ?? ""} />}
         {!extraActive && tab === "log" && <CompilerLog steps={compileSteps} plan={plan} highlight={highlight} language={language} />}
-        {!extraActive && tab === "output" && <ProgramOutput execution={execution} step={runStep} highlight={highlight} language={language} />}
+        {!extraActive && tab === "output" && (
+          <div className="flex min-h-full flex-col">
+            {props.terminalHeader}
+            <div className="flex min-h-0 flex-1 flex-col">
+              <ProgramOutput execution={execution} step={runStep} highlight={highlight} language={language} />
+            </div>
+          </div>
+        )}
         {!extraActive && tab === "details" && <RunDetails execution={execution} language={language} />}
       </div>
     </section>
@@ -137,7 +154,7 @@ function ProgramOutput({
   if (!step || step.status === "SKIPPED" || step.status === "PENDING") {
     const reason =
       execution.state === "COMPILE_ERROR"
-        ? "The program did not run because the code has errors. Fix the problems listed in Diagnostics, then run again."
+        ? "The program did not run because the code has errors. Fix the problems listed under Problems (on the right), then run again."
         : (execution.error ?? execution.summary);
     return (
       <EmptyState icon={<XCircle size={20} className="text-danger-fg" />} title="The program did not run">

@@ -6,7 +6,12 @@ import { App } from "./App";
 import "./index.css";
 import "./styles/kairo.css";
 import "./styles/fx.css";
+import "./styles/astra.css";
+import { registerPwa } from "./pwa/install";
 import { ToastProvider } from "./ui/Toast";
+
+// Installable as an app (Chrome, Edge, Android; iPhone and iPad via Add to Home Screen).
+registerPwa();
 
 // Monaco cancels its own pending work (suggestions, ghost text) while the student types,
 // and some of those cancellations surface as unhandled "Canceled" rejections. They are

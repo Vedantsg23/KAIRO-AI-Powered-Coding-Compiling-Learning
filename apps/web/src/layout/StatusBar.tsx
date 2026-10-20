@@ -1,4 +1,4 @@
-import { Check, Keyboard, PencilLine } from "lucide-react";
+import { Check, Cloud, CloudOff, Keyboard, Loader2, PencilLine } from "lucide-react";
 import type { Execution } from "../api/types";
 import type { HealthState } from "../lib/hooks";
 import { Dot } from "../ui/primitives";
@@ -13,6 +13,8 @@ interface Props {
   saarthiStatus: "checking" | "online" | "offline";
   /** Languages that can run here, of all the server knows. */
   languages: { ready: number; total: number } | null;
+  /** A signed-in account's cloud saves (null for guests: saved in this browser only). */
+  cloud?: "off" | "loading" | "synced" | "saving" | "offline" | null;
 }
 
 export interface HealthView {
@@ -27,10 +29,10 @@ export interface HealthView {
 export function healthView(health: HealthState): HealthView {
   if (health.kind === "checking") return { dot: "bg-faint", text: "Checking sandbox...", title: "Contacting the API", pulse: true, core: false };
   if (health.kind === "down")
-    return { dot: "bg-danger", text: "API offline", title: "Start the API (see README); this page retries automatically", pulse: false, core: false };
+    return { dot: "bg-danger", text: "API offline", title: "The KAIRO server cannot be reached; this page retries automatically", pulse: false, core: false };
   const { runner } = health.health;
   if (runner.status === "unreachable")
-    return { dot: "bg-danger", text: "Runner offline", title: "Start the runner (see README)", pulse: false, core: true };
+    return { dot: "bg-danger", text: "Runner offline", title: "The code runner cannot be reached right now", pulse: false, core: true };
   if (runner.docker === false)
     return { dot: "bg-warn", text: "Sandbox degraded", title: "Docker is not reachable by the runner", pulse: false, core: true };
   const missing = Object.values(runner.images ?? {}).filter((id) => !id).length;
@@ -46,7 +48,7 @@ export function healthView(health: HealthState): HealthView {
 }
 
 /** The status strip along the bottom: real system state only. */
-export function StatusBar({ health, execution, fileName, cursor, draftSaved, onShortcuts, saarthiStatus, languages }: Props) {
+export function StatusBar({ health, execution, fileName, cursor, draftSaved, onShortcuts, saarthiStatus, languages, cloud = null }: Props) {
   const view = healthView(health);
   const toolchain = execution?.toolchain;
   const queue = health.kind === "up" ? health.health.queue.depth : null;
@@ -85,11 +87,25 @@ export function StatusBar({ health, execution, fileName, cursor, draftSaved, onS
         Ln {cursor.line}, Col {cursor.column}
       </span>
       <span className="hidden normal-case tracking-normal md:inline">UTF-8</span>
-      <span className={item} title="Your code is saved in this browser only (Ctrl+S saves right away)">
+      <span className={item} title={cloud ? "Your code is saved in this browser and to your account (Ctrl+S saves right away)" : "Your code is saved in this browser only (Ctrl+S saves right away). Sign in to keep it in your account."}>
         {/* A still icon while saving: a spinner here would animate on every keystroke. */}
         {draftSaved ? <Check size={11} className="text-brand-fg" /> : <PencilLine size={11} className="text-accent-fg" />}
         <span className="hidden sm:inline">{draftSaved ? "Draft saved" : "Saving"}</span>
       </span>
+      {cloud && cloud !== "off" && (
+        <span
+          className={`${item} ${cloud === "offline" ? "text-warn-fg" : ""}`}
+          title={
+            cloud === "offline"
+              ? "Your account could not be reached: changes stay in this browser and are uploaded when the connection is back"
+              : "Your code, progress, badges and settings are saved to your account"
+          }
+          data-testid="cloud-status"
+        >
+          {cloud === "offline" ? <CloudOff size={11} /> : cloud === "saving" || cloud === "loading" ? <Loader2 size={11} className="animate-spin" /> : <Cloud size={11} className="text-brand-fg" />}
+          <span className="hidden md:inline">{cloud === "offline" ? "Offline" : cloud === "saving" ? "Syncing" : cloud === "loading" ? "Loading" : "Synced"}</span>
+        </span>
+      )}
       <button type="button" onClick={onShortcuts} className="flex items-center gap-1 uppercase hover:text-fg" aria-label="Keyboard shortcuts">
         <Keyboard size={12} /> <span className="hidden sm:inline">Keys</span>
       </button>

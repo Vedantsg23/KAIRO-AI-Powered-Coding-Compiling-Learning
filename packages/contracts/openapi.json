@@ -128,6 +128,77 @@
         }
       }
     },
+    "/api/v1/executions/run": {
+      "post": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Run Execution",
+        "description": "Queue a compile-and-run and stream its snapshots until it finishes (one request, no WebSocket).",
+        "operationId": "run_execution_api_v1_executions_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "One ExecutionOut per line, ending with the terminal one.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/x-ndjson": {}
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request Entity Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/executions/{execution_id}": {
       "get": {
         "tags": [
@@ -569,6 +640,97 @@
         }
       }
     },
+    "/api/v1/assistant/ask/stream": {
+      "post": {
+        "tags": [
+          "assistant"
+        ],
+        "summary": "Ask Stream",
+        "description": "Answer a question, streaming the text while the model writes it (one JSON object per line).",
+        "operationId": "ask_stream_api_v1_assistant_ask_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "start, then delta events with the text as it is written, then done (or error).",
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/x-ndjson": {}
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/assistant/complete": {
       "post": {
         "tags": [
@@ -660,6 +822,25 @@
           }
         }
       }
+    },
+    "/api/v1/system/keepalive": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Keepalive",
+        "operationId": "keepalive_api_v1_system_keepalive_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -729,6 +910,32 @@
             "type": "array",
             "maxItems": 8,
             "title": "History"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 3000000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence",
+            "description": "The run's sealed evidence from its final snapshot; lets any server instance answer about a run it did not execute. The server checks the seal."
+          },
+          "diagnosticId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnosticid",
+            "description": "With executionId: the diagnostic the question is about."
           }
         },
         "type": "object",
@@ -1227,6 +1434,18 @@
               }
             ],
             "title": "Error"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence",
+            "description": "Sealed copy of the finished run (terminal snapshots only); send it with Saarthi requests about this run."
           }
         },
         "type": "object",
@@ -1426,6 +1645,19 @@
               }
             ],
             "title": "Question"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 3000000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence",
+            "description": "The run's sealed evidence from its final snapshot; lets any server instance answer about a run it did not execute. The server checks the seal."
           }
         },
         "type": "object",
@@ -1569,6 +1801,19 @@
               }
             ],
             "title": "Diagnosticid"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 3000000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence",
+            "description": "The run's sealed evidence from its final snapshot; lets any server instance answer about a run it did not execute. The server checks the seal."
           }
         },
         "type": "object",
@@ -1649,6 +1894,18 @@
             "type": "boolean",
             "title": "Cached",
             "default": false
+          },
+          "fixToken": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixtoken",
+            "description": "The sealed proposal; send it back to /verify."
           }
         },
         "type": "object",
@@ -2072,6 +2329,32 @@
             "maxLength": 64,
             "title": "Executionid",
             "description": "The run of the patched code."
+          },
+          "fixToken": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixtoken",
+            "description": "FixOut.fixToken of the proposal."
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 3000000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence",
+            "description": "The run's sealed evidence from its final snapshot; lets any server instance answer about a run it did not execute. The server checks the seal."
           }
         },
         "type": "object",

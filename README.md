@@ -11,9 +11,10 @@
 <br>
 
 [![Languages](https://img.shields.io/badge/languages-32_+_web-22c55e?style=for-the-badge)](#languages)
-[![Sandbox](https://img.shields.io/badge/sandbox-Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](#security-model)
+[![Live site](https://img.shields.io/badge/live-kairo--ai--phi.vercel.app-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://kairo-ai-phi.vercel.app)
+[![Sandbox](https://img.shields.io/badge/sandbox-Docker_or_Vercel_Sandbox-2496ED?style=for-the-badge&logo=docker&logoColor=white)](#security-model)
 [![AI guide](https://img.shields.io/badge/AI_guide-Saarthi-06b6d4?style=for-the-badge)](#saarthi-the-ai-guide)
-[![Live analyzer](https://img.shields.io/badge/live_analyzer-p95_under_200_ms-16a34a?style=for-the-badge)](#live-analyzer)
+[![Live analyzer](https://img.shields.io/badge/live_analyzer-p95_about_200_ms-16a34a?style=for-the-badge)](#live-analyzer)
 [![Notebook](https://img.shields.io/badge/notebook-Jupyter--style-F37626?style=for-the-badge&logo=jupyter&logoColor=white)](#languages)
 [![Status](https://img.shields.io/badge/milestones-M1_to_M6_done-0b1510?style=for-the-badge)](#roadmap-and-status)
 
@@ -30,7 +31,9 @@
 [![Playwright](https://img.shields.io/badge/Playwright-1.56-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev)
 [![Claude](https://img.shields.io/badge/Claude_API-optional-D97757?style=flat-square&logo=anthropic&logoColor=white)](https://platform.claude.com)
 [![Ollama](https://img.shields.io/badge/Ollama-local_models-000000?style=flat-square&logo=ollama&logoColor=white)](https://ollama.com)
-[![Supabase](https://img.shields.io/badge/Supabase-accounts,_optional-3FCF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com)
+[![Supabase](https://img.shields.io/badge/Supabase-accounts_and_saved_work-3FCF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com)
+[![Vercel](https://img.shields.io/badge/Vercel-Functions,_Sandbox,_AI_Gateway-000000?style=flat-square&logo=vercel&logoColor=white)](infra/vercel/README.md)
+[![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?style=flat-square&logo=pwa&logoColor=white)](#highlights)
 
 <p>
 <a href="#about-the-project"><b>About</b></a> ·
@@ -100,7 +103,7 @@ and AI chat assistants explain it but guess: they invent fixes and call them cor
 | The gap | What students usually get | What KAIRO does |
 |---|---|---|
 | Cryptic errors | `expected ',' or ';' before 'printf'`, reported on the line *after* the mistake | One diagnostic format for 32 toolchains: exact range, a stable code (`C_MISSING_SEMICOLON`), a hint ("the missing `;` probably belongs at the end of line 4") and a plain-language note |
-| Feedback only after a run | Mistakes found only when you press Run | A syntax check in the browser 150 ms after you stop typing, with the concept behind each slip and a rule-based quick fix where the repair is unambiguous; a measured p95 of 187 to 190 ms from keystroke to marker on 500-line files |
+| Feedback only after a run | Mistakes found only when you press Run | A syntax check in the browser 150 ms after you stop typing, with the concept behind each slip and a rule-based quick fix where the repair is unambiguous; a measured p95 of about 200 ms from keystroke to marker on 500-line files |
 | AI that guesses | Fixes that were never tried, presented as correct | Saarthi answers only from one stored run, proposes the smallest patch, changes nothing without your approval, and lets a real run decide whether the fix worked |
 | Unsafe execution | Untrusted code run with weak isolation | Every step in a fresh container: no network, read-only file system, non-root user, no capabilities, strict time, memory, process and output limits |
 
@@ -169,7 +172,9 @@ QUICK FIX; the concept at your cursor is detected too. It never contacts the ser
 
 **Saarthi, the AI guide**<br>
 Explains a problem from your run's source, diagnostics and output; proposes a minimal patch as a diff; applies it
-only when you press Apply; verifies it with a real run. Claude or any OpenAI-compatible model such as Ollama.
+only when you press Apply; verifies it with a real run. Its answers stream in word by word in a chat panel like
+Copilot's, with one-tap questions such as "Explain this error". Vercel AI Gateway on the live site; Claude or any
+OpenAI-compatible model such as Ollama elsewhere.
 
 </td>
 </tr>
@@ -177,8 +182,8 @@ only when you press Apply; verifies it with a real run. Claude or any OpenAI-com
 <td valign="top">
 
 **The build pipeline**<br>
-QUEUE, COMPILE, RUN and RESULT light up as the real run reports progress over a WebSocket, above a terminal
-that shows the command, the output, the exit status and the time. A crash is mapped back to your line.
+QUEUE, COMPILE, RUN and RESULT light up as the real run reports progress (streamed in the same request), above a
+terminal that shows the command, the output, the exit status and the time. A crash is mapped back to your line.
 
 </td>
 <td valign="top">
@@ -192,10 +197,11 @@ a read-only file system and strict limits. Six hostile programs are contained in
 <tr>
 <td valign="top">
 
-**A compiler console**<br>
-A boot sequence of real system checks, then one screen: explorer, editor, terminal, diagnostics and Saarthi's
-panel, with the system status along the edges and Saarthi floating in the editor's corner. A white "signal"
-theme by default and a graphite dark theme; animations follow "reduce motion" and can be switched off.
+**A workspace like VS Code**<br>
+A boot sequence of real system checks, then one screen laid out like VS Code or Antigravity: the explorer, the
+editor, a big terminal you drag to resize, maximize or hide with Ctrl+\`, and Saarthi's chat panel; every panel
+resizes and hides, and the layout is remembered. Plain labels ("Hide the terminal", "Problems") for beginners. A
+white "signal" theme by default and a graphite dark theme.
 
 </td>
 <td valign="top">
@@ -258,8 +264,27 @@ you sign in.
 <td valign="top">
 
 **Guests or accounts**<br>
-Start as a guest in seconds, or (with a Supabase project) sign in with Google, GitHub, Microsoft, a phone number
-or email and password, create an account, and reset a forgotten password.
+Start as a guest in seconds, or create an account and stay signed in: your code, progress, badges and settings
+are saved to it (Supabase, Row Level Security) and follow you to any device. Google, GitHub, Microsoft and phone
+sign-in can be added.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Online, no Docker needed**<br>
+The live site runs on Vercel: the API is one Python function, every run goes to a Vercel Sandbox micro-VM built
+from the same sandbox images with the same limits, and a daily keep-alive keeps the database and the runner
+awake. See [infra/vercel/README.md](infra/vercel/README.md).
+
+</td>
+<td valign="top">
+
+**Install it like an app**<br>
+Chrome and Edge on a computer or an Android phone offer **Install app**; on an iPhone or iPad, Add to Home
+Screen. KAIRO then opens in its own window with its own icon. While it starts, a field of stars gathers into the
+KAIRO mark, and launching the workspace is a short flight through them.
 
 </td>
 </tr>
@@ -376,16 +401,19 @@ or email and password, create an account, and reset a forgotten password.
   <img alt="An animation of one real C run: queued at 0 ms, the runner starts at 5 ms, a fresh container compiles the program from 83 to 336 ms, another runs it until 581 ms, and the result is shown at 583 ms." src="docs/images/readme/run-journey-dark.svg" width="100%">
 </picture>
 
-1. **You press Run.** The editor sends its exact text, the input and the language: `POST /api/v1/executions`.
+1. **You press Run.** The editor sends its exact text, the input and the language: `POST /api/v1/executions/run`.
 2. **The API admits the run.** It checks the sizes (64 KB of source, 16 KB of input), records the SHA-256 of the
    exact snapshot, checks that the language's sandbox image is installed, and puts the run in a bounded queue. It
-   answers `202 Accepted` at once; the browser then follows the run over a WebSocket.
+   answers at once with a stream: a full snapshot of the run on every change, in the same request, so it works on
+   serverless hosts too (`POST /api/v1/executions` with a WebSocket remains for other clients).
 3. **The runner prepares.** It re-checks the job against its own policy (allowed images, limit ceilings, file
    names, environment), creates a workspace volume and copies the source in through a container that is created
    but never started.
 4. **Compile or check.** A fresh container compiles the program (or, for interpreted languages, checks its
    syntax), with no network and strict limits.
 5. **Execute.** Another fresh container runs it, with the workspace read-only and only a small `/tmp` writable.
+   On the live site the runner is a Vercel Sandbox micro-VM instead of Docker: `kairo_exec.py` gives each step the
+   same isolation with namespaces, cgroups and seccomp ([infra/vercel/README.md](infra/vercel/README.md)).
 6. **Diagnostics.** The API turns the toolchain's output into diagnostics: grammar rules, block parsers for
    tracebacks and stack traces, stable codes, hints, and synthesized diagnostics for silent crashes and limits.
 7. **Result.** The final snapshot reaches the browser. Markers appear only while the editor still holds exactly
@@ -398,10 +426,9 @@ sequenceDiagram
     participant A as API (FastAPI)
     participant R as Runner
     participant D as Docker
-    B->>A: POST /api/v1/executions {languageId, source, stdin}
+    B->>A: POST /api/v1/executions/run {languageId, source, stdin}
     A->>A: size checks, SHA-256, image installed? (409 if not), queue bound (503 if full)
-    A-->>B: 202 Accepted (state QUEUED)
-    B->>A: WebSocket /api/v1/executions/{id}/events
+    A-->>B: 200, a stream of snapshots begins (state QUEUED)
     A->>R: POST /v1/jobs (JobSpec built from the language profile)
     R->>R: policy check: image allow-list, limit ceilings, file names, environment
     R->>D: create a volume, seed the file (container created, never started)
@@ -414,7 +441,7 @@ sequenceDiagram
     R->>D: remove the containers and the volume
     R-->>A: job_finished (exit codes, signals, bounded output)
     A->>A: normalize into diagnostics, decide the final state
-    A-->>B: final snapshot, then close
+    A-->>B: final snapshot with its signed evidence, then the stream ends
 ```
 
 <details>
@@ -438,8 +465,9 @@ stateDiagram-v2
     STARTING --> INTERNAL_ERROR: runner unreachable or failed
 ```
 
-Every change increments the execution's version, and WebSocket subscribers receive the full snapshot, so a client
-that misses a message still ends in the right state. If the socket cannot be opened, the browser polls instead.
+Every change increments the execution's version, and every streamed line (or WebSocket message) is the full
+snapshot, so a client that misses one still ends in the right state. If the stream breaks, the browser keeps the
+last snapshot and says the run was interrupted, instead of showing it as finished.
 
 </details>
 
@@ -558,8 +586,9 @@ files, 14 languages, 20 edits each, headless Chromium on a 2-vCPU machine, devel
 187.2 ms in the full browser suite (172.2 and 190.0 ms when run alone). The code from before the redesign, measured
 on the same machine the same day, gave 169.9 and 189.3 ms: the new interface costs nothing measurable while typing.
 With the notebook, the extensions and AI autocomplete added (6 Oct 2026), the full browser suite measured 172.6 ms
-(p50) and 196.7 ms (p95). The bars below are the p95 per language from the 30 Sep full run; the line is the 300 ms
-target.
+(p50) and 196.7 ms (p95). With the VS Code-style workspace, the streamed Saarthi chat and accounts (15 Oct 2026):
+174.2 ms (p50) and 203.9 ms (p95) in the full browser suite, 175.9 and 206.9 ms when run alone. The bars below are
+the p95 per language from the 30 Sep full run; the line is the 300 ms target.
 
 ```mermaid
 xychart-beta
@@ -874,9 +903,9 @@ Everyone starts on the entry page: a hero whose code glyphs scatter around the p
 holo-platform with cards that tilt towards you, a scrolling tour of the pipeline guided by Saarthi, and a live
 analyzer playground.
 **Guests** need only a name, an emblem, an experience level and a start language; their profile lives in the
-browser. **Accounts** (Google, GitHub, Microsoft, a phone number, or email and password, with Create account and
-password reset) switch on when the web app is built with a Supabase project's URL and publishable key
-([docs/accounts.md](docs/accounts.md)).
+browser. **Accounts** (email and password with Create account and password reset; Google, GitHub, Microsoft and
+phone when set up) save the code, progress, badges and settings to Supabase, so they follow the student to any
+device ([docs/accounts.md](docs/accounts.md)).
 
 Only things the platform observed earn XP, never self-reported ones:
 
@@ -923,7 +952,10 @@ it.
 
 ## Quick start
 
-KAIRO needs a Linux Docker daemon to run programs. Pick one way:
+**Use it online:** <https://kairo-ai-phi.vercel.app>, nothing to install (or install it as an app from there).
+
+To run your own copy, pick one way. The first three need a Linux Docker daemon; the fourth needs only Vercel and
+Supabase accounts.
 
 <details open>
 <summary><b>A. GitHub Codespaces (no Docker on your computer)</b></summary>
@@ -971,6 +1003,20 @@ stand-in that is clearly labelled as not an AI.
 
 </details>
 
+<details>
+<summary><b>D. Vercel (no Docker, always online)</b></summary>
+<br>
+
+1. Import the repository in Vercel; `vercel.json` and `pyproject.toml` configure everything (no environment
+   variables are required).
+2. Build the runner snapshot once and create the `kairo-runner` sandbox from it.
+3. Create a Supabase project, apply `supabase/migrations/`, put its URL and publishable key in
+   `infra/vercel/public-settings.json`, and turn off "Confirm email".
+
+Step by step: [infra/vercel/README.md](infra/vercel/README.md) and [docs/accounts.md](docs/accounts.md).
+
+</details>
+
 **First things to try:** press **Run** on the starter program; open **Examples → Missing semicolon → Run**, then
 **Explain**, **Fix** and **Apply and verify**; switch to Python and type `if x > 1` without the colon; press
 **Ctrl+K** and type a few letters of anything (a language, an example, "fold", ":12"); press **Shift+Alt+F** to
@@ -991,18 +1037,20 @@ format messy code; open the **notebook** from the left bar and press **Shift+Ent
 | `RUNNER_WORKERS` | `4` | Sandboxes that may run at once (the API dispatches the same number) |
 | `WEB_PORT` | `8080` | Port for the app and API with Docker Compose |
 | `WEB_BIND` | `127.0.0.1` | Interface to listen on. `0.0.0.0` only on a trusted network |
-| `CC_AI_PROVIDER` | `anthropic` | `anthropic`, `openai` (any OpenAI-compatible server) or `none` |
+| `CC_AI_PROVIDER` | `anthropic` (`gateway` on Vercel) | `anthropic`, `openai` (any OpenAI-compatible server), `gateway` (Vercel AI Gateway) or `none` |
 | `ANTHROPIC_API_KEY` | empty | Key for Claude. Without it Saarthi is off and everything else works |
 | `CC_AI_MODEL` | `claude-haiku-4-5-20251001` | Model id |
 | `CC_AI_BASE_URL` | empty | For `openai`: e.g. `http://127.0.0.1:11434/v1` (Ollama) |
 | `CC_AI_API_KEY` or `OPENAI_API_KEY` | empty | For `openai` servers that need a key (Ollama does not) |
-| `CC_AI_REQUESTS_PER_MINUTE` / `_PER_DAY` | `6` / `150` | Saarthi limits per client (IP address) |
+| `CC_AI_REQUESTS_PER_MINUTE` / `_PER_DAY` | `10` / `150` | Saarthi limits per client (IP address) |
 | `CC_AI_DAILY_BUDGET` | `3000` | Saarthi requests per day for the whole server |
 | `CC_MAX_QUEUE` | `20` | Runs that may wait; beyond that the API answers 503 with Retry-After |
 | `CC_MAX_SOURCE_BYTES` / `CC_MAX_STDIN_BYTES` | 64 KB / 16 KB | Size limits of a run |
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | empty | Turn on accounts (public values, used at build time) |
+| `VITE_AUTH_PROVIDERS` | empty | Extra sign-in buttons: `google`, `github`, `azure`, `phone` |
 
-Keys stay on the server: `.env` is git-ignored, and no response or log contains them.
+Keys stay on the server: `.env` is git-ignored, and no response or log contains them. The Vercel deployment's
+settings (all optional) are listed in [infra/vercel/README.md](infra/vercel/README.md).
 
 </details>
 
@@ -1038,11 +1086,12 @@ Interactive OpenAPI docs are served at `/docs` while the API runs. Contracts: [d
 
 ## Testing and quality
 
-| Suite | Command | Result (6 Oct 2026) |
+| Suite | Command | Result (15 Oct 2026) |
 |---|---|---|
-| API | `pytest services/api` | **358 passed**: golden tests for every toolchain's real output, all 41 profiles (32 languages, Swift, 7 formatters, the notebook), endpoints, the state machine, Saarthi (explain, fix, verify, ask, autocomplete) against a scripted fake model, contract freshness |
+| API | `pytest services/api` | **378 passed**: golden tests for every toolchain's real output, all 41 profiles (32 languages, Swift, 7 formatters, the notebook), endpoints, the state machine, Saarthi (explain, fix, verify, ask, streamed answers, autocomplete) against scripted fake models, the Vercel setup (streamed runs, signed evidence across instances, the Vercel Sandbox client against a fake Vercel API, OIDC tokens, the keep-alive, serving the web app), contract freshness |
 | Runner | `pytest services/runner` | **49 passed**: policy, HTTP layer and the containment corpus against real Docker |
-| Every language end to end | `make test-languages` | **459 passed, 15 skipped** (Swift, and Verilog's process and network programs): for each language and the notebook a program with input, a compile error, a runtime error, out-of-memory codes, six hostile programs, every example, and the seven formatters |
+| Every language end to end | `make test-languages` | **459 passed, 15 skipped** (Swift, and Verilog's process and network programs; 6 Oct 2026): for each language and the notebook a program with input, a compile error, a runtime error, out-of-memory codes, six hostile programs, every example, and the seven formatters |
+| The same, in the Vercel Sandbox runner VM | `KAIRO_EXECUTOR=/opt/kairo/sbin/kairo_exec.py pytest tests/integration` (inside the VM) | **459 passed, 15 skipped** (14 Oct 2026): the Docker-free executor contains the same hostile programs |
 | Web unit tests | `vitest run` | **162 passed**: live-check rules and quick fixes, concepts, edits, the palette's fuzzy matching, markers, patches, hashes, run pipeline, moods, XP and badges, the preview documents, notebook runs and `.ipynb`, ghost-text brackets |
 | Browser tests | `make e2e` | **93 passed** (Chromium): boot sequence, entry page chapters, header links and Saarthi's hello and welcome, sign-in options, playground, pipeline tour, custom cursor, reduced motion, command palette, draggable Saarthi, tour, runs, errors, stale results, crashes, input, language picker, fast typing, drafts, themes, sounds, tablet and phone layouts, one example per language, HTML/CSS/React preview, the notebook, formatters, Emmet, Vim keys, AI autocomplete, live analyzer, quick fixes, concepts, latency, Saarthi explain, fix, verify and ask, badges and moods |
 | Lint and types | `make lint` | `ruff` and `tsc -b`: clean. `npm audit --omit=dev`: 0 vulnerabilities (DOMPurify pinned to 3.4.16 under Monaco) |
@@ -1076,11 +1125,14 @@ Dockerfile, and tries Swift in a separate job that may fail.
 ```text
 apps/web/                    React 18 + TypeScript + Vite + Tailwind + Monaco
   src/auth/                  entry page (hero, pipeline tour, analyzer playground), guest profiles, Supabase sign-in
-  src/boot/                  the boot sequence (real system checks)
+  src/cloud/                 an account's saved work: Supabase sync of drafts, progress, settings, notebook
+  src/boot/                  the boot sequence (real system checks, the Astra star field)
+  src/layout/                the VS Code-style workbench (resizable, hideable panels), top bar, status bar
+  src/pwa/                   installing KAIRO as an app (the service worker is public/sw.js)
   src/workspace/             explorer, command palette and its commands
   src/fx/                    interaction layer: cursor, magnetic buttons, text and scroll reveals, tilt,
-                             parallax, marquee, code-glyph canvas, curtain, sounds
-  src/styles/                KAIRO components (kairo.css) and motion (fx.css)
+                             parallax, marquee, code-glyph canvas, star field and star flight, sounds
+  src/styles/                KAIRO components (kairo.css) and motion (fx.css, astra.css)
   src/cosmos/                moods, celebrations
   src/mascot/                Saarthi's avatar and the draggable companion
   src/profile/               XP, levels, badges, streaks, profile card
@@ -1089,7 +1141,7 @@ apps/web/                    React 18 + TypeScript + Vite + Tailwind + Monaco
   src/extensions/            the Extensions view and its registry
   src/notebook/              the Jupyter-style Python notebook, its cells and terminal
   src/preview/               HTML, CSS and React in a sandboxed preview frame
-  src/assistant/             Saarthi panel
+  src/assistant/             Saarthi's chat panel (streamed answers)
   src/execution/             run journey, output, input, run details
   src/diagnostics/           problem cards, plain-language notes
   src/onboarding/            welcome, tour, examples for every language
@@ -1099,12 +1151,16 @@ services/api/app/            FastAPI: never runs code, never touches Docker
   adapters/grammars/*.toml   how each toolchain's output is read
   analysis/                  grammar matching, classification, crash synthesis
   ai/                        Saarthi: evidence, prompts, providers, validation
+  queue/                     runner clients: the Docker runner (HTTP) and the Vercel Sandbox VM
 services/runner/runner/      the only component with Docker access; language-agnostic
+infra/vercel/                the Vercel deployment: the runner VM's executor and snapshot build, build keys
+supabase/migrations/         accounts schema with Row Level Security, keep-alive function
 infra/containers/            sandbox images (gcc, java, python, node, go, rust, dotnet, kotlin, scripting, native,
                              extra, swift); python/notebook.py runs notebooks, python/format_python.py runs Black
 tests/integration/           every language end to end, hostile programs, examples
 packages/contracts/          generated OpenAPI and JSON Schemas
 scripts/                     fixture capture, the stand-in AI for tests
+vercel.json, pyproject.toml  Vercel build, function, cron and headers; the function's Python dependencies
 .devcontainer/               GitHub Codespaces setup
 docs/                        design, API, languages, threat model, reports, images
 ```
@@ -1125,7 +1181,8 @@ timeline
     M5 : Saarthi explanations grounded in evidence
     M6 : Reviewable fixes and re-verification
     UI : KAIRO console, boot sequence, Saarthi avatar, interactive entry page
-    M7 : Accounts and persistence, deployment, evaluation
+    Live : Vercel deployment, accounts with saved work, streamed Saarthi, installable app
+    M7 : Evaluation with students
 ```
 
 | Milestone | Status |
@@ -1137,12 +1194,12 @@ timeline
 | M5 Saarthi explanations grounded in evidence | Done (tested with a stand-in provider; a real key not yet tried) |
 | M6 Reviewable fixes and automatic re-verification | Done |
 | UI: the KAIRO console, boot sequence, Saarthi avatar, command palette, interactive entry page, badges | Done |
-| 17 more languages, HTML/CSS/React preview, Python notebook, extensions and formatters, AI autocomplete, sign-in options | Done (accounts not yet tried on a real Supabase project) |
-| M7 Persistence and accounts on Supabase, deployment, evaluation | Next |
+| 17 more languages, HTML/CSS/React preview, Python notebook, extensions and formatters, AI autocomplete, sign-in options | Done |
+| Live site on Vercel without Docker: Vercel Sandbox runner, AI Gateway, Supabase accounts with saved code, progress, badges and settings, daily keep-alive, streamed Saarthi chat, VS Code-style workspace, installable app | Done: [infra/vercel/README.md](infra/vercel/README.md) |
+| M7 Evaluation | Next |
 
-**M7** covers a Supabase project (accounts on, then run history, drafts and progress stored per user with
-row-level security), per-user limits and ownership checks in the API, a deployment on a Linux server with Docker,
-and an evaluation with students (task completion, time to fix an error, usefulness of explanations).
+**M7** is an evaluation with students (task completion, time to fix an error, usefulness of explanations), and
+per-user limits in the API for signed-in accounts.
 
 <p align="right"><a href="#readme-top">back to top</a></p>
 
@@ -1168,8 +1225,9 @@ Department of Computer Engineering, DYPCOEI Varale, 2026-27, Group 04.
 | [docs/languages.md](docs/languages.md) | Every language's toolchain, commands and limits; enabling Swift |
 | [docs/saarthi.md](docs/saarthi.md) | The AI guide, its safeguards and configuration |
 | [docs/ui.md](docs/ui.md) | The KAIRO console, its design system and interaction layer, accessibility, measured performance |
-| [docs/accounts.md](docs/accounts.md) | Guests, accounts with Supabase, XP and badges |
-| [docs/api.md](docs/api.md) | REST and WebSocket API, the diagnostic format, the runner contract |
+| [docs/accounts.md](docs/accounts.md) | Guests, accounts with Supabase and what they save, the keep-alive, XP and badges |
+| [infra/vercel/README.md](infra/vercel/README.md) | The live site on Vercel: how it fits together, deploying, the runner snapshot |
+| [docs/api.md](docs/api.md) | REST, streaming and WebSocket API, the diagnostic format, the runner contract |
 | [docs/threat-model.md](docs/threat-model.md) | Threats, controls, per-language containment results, residual risks |
 | [docs/adding-a-language.md](docs/adding-a-language.md) | How a language is added |
 | [docs/codespaces.md](docs/codespaces.md) | Running everything in GitHub Codespaces |

@@ -23,6 +23,7 @@ import { HeroStage } from "./HeroStage";
 import { PipelineTour } from "./PipelineTour";
 import { Playground } from "./Playground";
 import { AccountPanel } from "./AccountPanel";
+import { InstallButton, useInstall } from "../pwa/install";
 
 const START_WITH = ["c", "python", "java", "javascript", "cpp", "go"];
 
@@ -154,6 +155,7 @@ export function LoginPage({
   // The chapter under a line 40% down the screen sets the tone and the background
   // scene; at the very bottom of the page, the last chapter.
   const [chapter, setChapter] = useState("hero");
+  const install = useInstall();
   useEffect(() => {
     const root = page.current;
     if (!root) return;
@@ -249,13 +251,14 @@ export function LoginPage({
               Saarthi AI
             </NavLink>
           </span>
+          <InstallButton state={install} className="ml-auto md:ml-2" />
           <button
             type="button"
             onClick={onToggleTheme}
             aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
             title={theme === "dark" ? "Light theme" : "Dark theme"}
             data-magnetic="0.4"
-            className="ml-auto flex h-8 w-8 items-center justify-center rounded-md border border-line bg-surface text-muted hover:text-fg md:ml-2"
+            className={`${install.available ? "ml-2" : "ml-auto md:ml-2"} flex h-8 w-8 items-center justify-center rounded-md border border-line bg-surface text-muted hover:text-fg`}
           >
             {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
           </button>

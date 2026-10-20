@@ -17,6 +17,19 @@ export function useTheme(): [Theme, () => void] {
       // ignore
     }
   }, [theme]);
+  // An account's saved settings were just loaded (cloud/sync.ts): take its theme.
+  useEffect(() => {
+    const onSettings = () => {
+      try {
+        const saved = localStorage.getItem("cd.theme");
+        if (saved === "dark" || saved === "light") setTheme(saved);
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("kairo:settings", onSettings);
+    return () => window.removeEventListener("kairo:settings", onSettings);
+  }, []);
   const toggle = useCallback(() => setTheme((t) => (t === "dark" ? "light" : "dark")), []);
   return [theme, toggle];
 }
@@ -71,3 +84,5 @@ export function useDebounced<T>(value: T, delayMs: number): T {
 /** True when the platform uses the Command key (macOS, iOS). */
 export const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 export const modKey = isMac ? "⌘" : "Ctrl";
+/** The Alt key's name on this keyboard (Option on a Mac). */
+export const altKey = isMac ? "Option" : "Alt";

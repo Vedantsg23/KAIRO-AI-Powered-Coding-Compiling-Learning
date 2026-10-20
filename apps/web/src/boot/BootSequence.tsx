@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { Health, Language } from "../api/types";
 import { NOTE_COUNT } from "../diagnostics/notes";
+import { AstraField } from "../fx/AstraField";
 import { KairoMark, KairoWordmark } from "../layout/Logo";
 import { offeredLanguages } from "../layout/LanguagePicker";
 import { LIVE_LANGUAGES } from "../live/support";
@@ -20,6 +21,8 @@ const BOOT_KEY = "kairo.booted";
 const STEP_MS = 115;
 const CHECK_TIMEOUT_MS = 2500;
 const MAX_MS = 4500;
+/** With motion on, the boot stays up long enough for the stars to finish forming the mark. */
+const MIN_MOTION_MS = 2100;
 
 /** Whether this browser tab has already seen the boot sequence. */
 export function bootedThisSession(): boolean {
@@ -115,6 +118,7 @@ export function BootSequence({ motion, onDone, onLeave }: { motion: boolean; onD
   const [summary, setSummary] = useState<{ core: boolean; sandbox: string; saarthi: string; node: string } | null>(null);
   const [leaving, setLeaving] = useState(false);
   const finished = useRef(false);
+  const startedAt = useRef(performance.now());
 
   const finish = () => {
     if (finished.current) return;
@@ -159,7 +163,8 @@ export function BootSequence({ motion, onDone, onLeave }: { motion: boolean; onD
   const done = shown >= plan.steps.length && results.every((r) => r !== null);
   useEffect(() => {
     if (!done || !summary) return;
-    const timer = window.setTimeout(() => finishRef.current(), motion ? 650 : 250);
+    const wait = motion ? Math.max(650, MIN_MOTION_MS - (performance.now() - startedAt.current)) : 250;
+    const timer = window.setTimeout(() => finishRef.current(), wait);
     return () => window.clearTimeout(timer);
   }, [done, summary, motion]);
 
@@ -167,8 +172,20 @@ export function BootSequence({ motion, onDone, onLeave }: { motion: boolean; onD
   const percent = Math.round((resolved / plan.steps.length) * 100);
 
   return (
-    <div className="k-boot" data-leaving={leaving ? "true" : undefined} data-testid="boot" role="dialog" aria-modal="true" aria-label="KAIRO is starting">
-      <div className="k-hud relative w-[min(560px,calc(100vw-2rem))] rounded-lg border border-line bg-surface/95 p-5 shadow-[var(--cd-shadow)] sm:p-7">
+    <div
+      // The star field is a night sky in either theme, so the card above it is drawn in the dark palette too.
+      className={`k-boot ${motion ? "dark" : ""}`}
+      data-leaving={leaving ? "true" : undefined}
+      data-testid="boot"
+      role="dialog"
+      aria-modal="true"
+      aria-label="KAIRO is starting"
+    >
+      {/* Stars gather into the KAIRO mark above the checks. */}
+      {motion && <AstraField mode="gather" motion markY={0.26} markSize={0.26} />}
+      <div
+        className={`k-hud relative w-[min(560px,calc(100vw-2rem))] rounded-lg border border-line p-5 shadow-[var(--cd-shadow)] sm:p-7 ${motion ? "mt-[30vh] bg-surface/80 backdrop-blur-md" : "bg-surface/95"}`}
+      >
         <div className="flex items-center gap-3">
           <KairoMark size={40} animated={motion} />
           <div className="text-fg">
@@ -191,12 +208,12 @@ export function BootSequence({ motion, onDone, onLeave }: { motion: boolean; onD
             return (
               <li key={step.label} className="k-boot-line flex items-center gap-2 uppercase tracking-[0.06em]" data-testid="boot-line">
                 <span className="text-faint">{String(i + 1).padStart(2, "0")}</span>
-                <span className="text-muted">{step.label}...</span>
+                <span className="min-w-0 truncate text-muted">{step.label}...</span>
                 <span className="min-w-4 flex-1 border-b border-dotted border-line-strong" aria-hidden />
                 {result ? (
-                  <b className={`font-semibold ${TONE_TEXT[result.tone]}`}>[ {result.value} ]</b>
+                  <b className={`shrink-0 whitespace-nowrap font-semibold ${TONE_TEXT[result.tone]}`}>[ {result.value} ]</b>
                 ) : (
-                  <span className="text-faint">[ .... ]</span>
+                  <span className="shrink-0 whitespace-nowrap text-faint">[ .... ]</span>
                 )}
               </li>
             );

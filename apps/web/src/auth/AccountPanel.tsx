@@ -3,6 +3,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "../ui/primitives";
 import {
   authConfigured,
+  authProviders,
   sendPasswordReset,
   sendPhoneCode,
   signInWithEmail,
@@ -95,15 +96,18 @@ export function AccountPanel({ mode, onGuest, onMode }: { mode: Mode; onGuest():
 
   const provider = (id: OAuthProvider) => void run(id, () => signInWithProvider(id));
 
-  const providers = (
-    <div className="grid grid-cols-3 gap-2">
-      {(
-        [
-          ["google", "Google", <Globe key="g" size={15} />],
-          ["github", "GitHub", <GitBranch key="h" size={15} />],
-          ["azure", "Microsoft", <MonitorSmartphone key="m" size={15} />],
-        ] as const
-      ).map(([id, label, icon]) => (
+  // Only the providers switched on for this deployment (VITE_AUTH_PROVIDERS); email always works.
+  const oauth = (
+    [
+      ["google", "Google", <Globe key="g" size={15} />],
+      ["github", "GitHub", <GitBranch key="h" size={15} />],
+      ["azure", "Microsoft", <MonitorSmartphone key="m" size={15} />],
+    ] as const
+  ).filter(([id]) => off || authProviders.has(id));
+  const phoneOn = off || authProviders.has("phone");
+  const providers = oauth.length > 0 && (
+    <div className={`grid gap-2 ${oauth.length === 1 ? "grid-cols-1" : oauth.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+      {oauth.map(([id, label, icon]) => (
         <Button
           key={id}
           onClick={() => provider(id)}
@@ -190,16 +194,18 @@ export function AccountPanel({ mode, onGuest, onMode }: { mode: Mode; onGuest():
             {busy === "signup" ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />} Create account
           </Button>
         </form>
-        <Divider>or sign up with</Divider>
+        {(providers || phoneOn) && <Divider>or sign up with</Divider>}
         {providers}
-        <button
-          type="button"
-          onClick={() => onMode("signin")}
-          disabled={off}
-          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-line px-3 py-2 text-[12.5px] font-semibold text-fg hover:border-brand/60 disabled:opacity-60"
-        >
-          <Phone size={14} /> Your phone number
-        </button>
+        {phoneOn && (
+          <button
+            type="button"
+            onClick={() => onMode("signin")}
+            disabled={off}
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-line px-3 py-2 text-[12.5px] font-semibold text-fg hover:border-brand/60 disabled:opacity-60"
+          >
+            <Phone size={14} /> Your phone number
+          </button>
+        )}
         <Message message={message} />
         {offNote}
         <p className="mt-4 text-center text-[12px] text-muted">
@@ -216,10 +222,10 @@ export function AccountPanel({ mode, onGuest, onMode }: { mode: Mode; onGuest():
     <div data-testid="account-signin">
       <h2 className="text-2xl font-semibold tracking-tight text-fg">Welcome back</h2>
       <p className="mt-1 text-sm text-muted">Sign in to pick up your code, badges and streaks.</p>
-      <div className="mt-4">{providers}</div>
+      {providers && <div className="mt-4">{providers}</div>}
 
-      <Divider>or with your phone</Divider>
-      {!codeSent ? (
+      {phoneOn && <Divider>{providers ? "or with your phone" : "with your phone"}</Divider>}
+      {!phoneOn ? null : !codeSent ? (
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -281,7 +287,7 @@ export function AccountPanel({ mode, onGuest, onMode }: { mode: Mode; onGuest():
         </form>
       )}
 
-      <Divider>or with email</Divider>
+      {providers || phoneOn ? <Divider>or with email</Divider> : <div className="mt-4" />}
       <form
         className="flex flex-col gap-2"
         onSubmit={(e) => {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { KairoMark } from "../layout/Logo";
+import { AstraField } from "./AstraField";
 
 /**
  * The transition into the workspace: two panels sweep across the screen,
@@ -24,6 +25,27 @@ export function Curtain({ onDone }: { onDone(): void }) {
       <div className="k-curtain-mark">
         <KairoMark size={64} animated />
         <span className="font-mono text-[11px] font-bold uppercase tracking-[0.3em] text-on-brand">Launching workspace</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The jump into the workspace: a short flight through the stars (every star
+ * rushes outwards into a streak) with the KAIRO mark, then it fades away to
+ * reveal the console. It never takes a click and is skipped with motion off.
+ */
+export function StarFlight({ onDone }: { onDone(): void }) {
+  useEffect(() => {
+    const done = window.setTimeout(onDone, 1150);
+    return () => window.clearTimeout(done);
+  }, [onDone]);
+  return (
+    <div className="k-flight" aria-hidden data-testid="curtain">
+      <AstraField mode="flight" />
+      <div className="k-flight-label">
+        <KairoMark size={64} animated />
+        <span className="font-mono text-[11px] font-bold uppercase tracking-[0.3em]">Launching workspace</span>
       </div>
     </div>
   );

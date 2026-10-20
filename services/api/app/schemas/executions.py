@@ -63,6 +63,9 @@ class ExecutionOut(ApiModel):
     steps: list[ExecutionStepOut]
     diagnostics: list[Diagnostic]
     error: str | None = None
+    evidence: str | None = Field(
+        default=None, description="Sealed copy of the finished run (terminal snapshots only); send it with "
+                                  "Saarthi requests about this run.")
 
 
 class ErrorOut(ApiModel):
