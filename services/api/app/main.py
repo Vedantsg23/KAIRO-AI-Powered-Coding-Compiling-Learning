@@ -106,7 +106,7 @@ def _serve_web_app(app: FastAPI, dist: Path) -> None:
         # (VERCEL_FASTAPI_STATIC_CDN unset), the function serves them and Vercel's
         # CDN caches the hashed ones after the first request.
         app.frontend("/", directory=str(dist), fallback="index.html")
-        app.add_middleware(CacheBuiltFiles)
+        app.add_middleware(WebAppCaching)
         return
     app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
 
@@ -120,34 +120,63 @@ def _serve_web_app(app: FastAPI, dist: Path) -> None:
         return FileResponse(index)
 
 
-class CacheBuiltFiles:
-    """Long caching for the web app's built files under /assets/.
+class WebAppCaching:
+    """HTTP caching for the web app the function serves on Vercel.
 
-    Their names carry a content hash, so a name never points to other content:
-    browsers and Vercel's CDN may keep them for a year. Pure ASGI, and only
-    /assets/ responses are touched: the streamed API responses pass through as is.
+    * Built files under /assets/: their names carry a content hash, so a name
+      never points to other content and browsers and Vercel's CDN may keep them
+      for a year.
+    * Everything else outside /api/ (the page itself, sw.js, the manifest,
+      icons): always the current deployment's. Vercel gives every file in a
+      function the same modification time (20 October 2018), so the file
+      server's ETag and Last-Modified stay the same across deployments whenever
+      a file keeps its size, and index.html does: it only names other files. A
+      browser's conditional request would then get "304 Not Modified" and keep
+      the old page, and with it the old app. These files are small, so they are
+      always sent whole: conditional request headers are ignored and no
+      validators are sent back.
+
+    Pure ASGI, so the streamed API responses pass through untouched.
     """
 
-    HEADERS = ((b"cache-control", b"public, max-age=31536000, immutable"), (b"cdn-cache-control", b"max-age=31536000"))
+    ASSET_HEADERS = ((b"cache-control", b"public, max-age=31536000, immutable"),
+                     (b"cdn-cache-control", b"max-age=31536000"))
+    VALIDATORS = (b"etag", b"last-modified")
+    CONDITIONS = (b"if-none-match", b"if-modified-since", b"if-match", b"if-unmodified-since", b"if-range")
 
     def __init__(self, app) -> None:
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or not scope["path"].startswith("/assets/"):
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if scope["type"] != "http" or path.startswith("/api/"):
             await self.app(scope, receive, send)
             return
+        if path.startswith("/assets/"):
+            await self.app(scope, receive, self._built_file(send))
+            return
+        headers = [(k, v) for k, v in scope["headers"] if k.lower() not in self.CONDITIONS]
+        await self.app({**scope, "headers": headers}, receive, self._current_file(send))
 
+    def _built_file(self, send):
         async def send_cached(message) -> None:
             if message["type"] == "http.response.start" and message["status"] == 200:
                 headers = message.get("headers", [])
                 html = any(k.lower() == b"content-type" and v.startswith(b"text/html") for k, v in headers)
                 if not html:  # a missing file answered with the page itself is not cached
                     kept = [(k, v) for k, v in headers if k.lower() not in (b"cache-control", b"cdn-cache-control")]
-                    message = {**message, "headers": [*kept, *self.HEADERS]}
+                    message = {**message, "headers": [*kept, *self.ASSET_HEADERS]}
             await send(message)
+        return send_cached
 
-        await self.app(scope, receive, send_cached)
+    def _current_file(self, send):
+        async def send_current(message) -> None:
+            if message["type"] == "http.response.start":
+                kept = [(k, v) for k, v in message.get("headers", [])
+                        if k.lower() not in (*self.VALIDATORS, b"cache-control")]
+                message = {**message, "headers": [*kept, (b"cache-control", b"no-cache")]}
+            await send(message)
+        return send_current
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

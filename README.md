@@ -1111,18 +1111,19 @@ Dockerfile, and tries Swift in a separate job that may fail.
 > [!WARNING]
 > **Not verified yet, stated plainly:** building the images from the real Docker Hub base images (Docker Hub was
 > blocked where this was built, so a local `ubuntu:24.04` made with `debootstrap` was used), Swift, GitHub
-> Codespaces, the CI workflow on GitHub (linted, never run), Windows and macOS, Saarthi and AI autocomplete with a
-> real model (only the labelled stand-in was used), accounts with a real Supabase project (Google, GitHub,
-> Microsoft, phone codes, email, password reset), and browsers other than headless Chromium. Details in the
+> Codespaces, the CI workflow on GitHub (linted, never run), the Docker setup on Windows and macOS, AI autocomplete
+> with a real model, sign-in with Google, GitHub, Microsoft or a phone code, password reset, installing the app, and
+> browsers other than Chromium. Details in the
 > [milestone report](docs/milestones/M3-M6-report.md#8-not-verified-stated-plainly).
 
 > [!NOTE]
-> **Checked on the live site** (`https://kairo-ai-phi.vercel.app`, 20 October 2026, Chromium 152 on Windows): the
-> Vercel build from `main`; a C program compiled and run in the Vercel Sandbox (83 ms); the live analyzer and compile
-> errors pinned to their lines; "results outdated" after an edit; the health, Saarthi status and keep-alive endpoints
-> (Supabase and the runner VM answered); the long-cached built files and the service worker. **Not yet:** Saarthi's
-> AI answers (AI Gateway refused them because the team had no AI Gateway credit turned on; see
-> [infra/vercel/README.md](infra/vercel/README.md#deploying)), creating an account, and installing the app.
+> **Checked on the live site** (`https://kairo-ai-phi.vercel.app`, 20 and 21 October 2026, Chromium 152 on Windows):
+> the Vercel build from `main`; C, Python (with input) and Java programs compiled and run in the Vercel Sandbox, with
+> no network inside it; the live analyzer and compile errors pinned to their lines; "results outdated" after an edit;
+> the health, Saarthi status and keep-alive endpoints (Supabase and the runner VM answered); Saarthi with real models:
+> streamed chat answers, explanations and fixes from Google's Gemini API (`gemini-3.5-flash-lite`) and, before the
+> Gemini key was added, from AI Gateway (`google/gemini-2.5-flash-lite`); the long-cached built files and the service
+> worker. The team created an email-and-password account on the live site and saw its work sync.
 
 <p align="right"><a href="#readme-top">back to top</a></p>
 

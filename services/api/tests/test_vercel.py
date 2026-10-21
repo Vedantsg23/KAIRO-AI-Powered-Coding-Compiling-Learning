@@ -692,6 +692,7 @@ def test_on_vercel_the_function_serves_the_web_app_with_long_caching_for_built_f
     dist = tmp_path / "dist"
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text("<!doctype html><title>KAIRO</title>")
+    (dist / "sw.js").write_text("self.addEventListener('fetch', () => {});")
     (dist / "assets" / "index-abc123.js").write_text("console.log('kairo')")
     monkeypatch.setenv("VERCEL", "1")
     settings = ApiSettings(web_dist=dist, runner_backend="http", ai_provider="none")
@@ -705,6 +706,16 @@ def test_on_vercel_the_function_serves_the_web_app_with_long_caching_for_built_f
         page = client.get("/any/route", headers={"accept": "text/html,*/*;q=0.8"})  # a browser navigation
         assert page.status_code == 200 and "<title>KAIRO</title>" in page.text
         assert "immutable" not in page.headers.get("cache-control", "")
+        # Vercel gives every file of a deployment the same modification time, so the file
+        # server's validators would match the previous deployment's page: a conditional
+        # request must still get the whole current page, and no validators are handed out.
+        since = {"if-modified-since": "Wed, 21 Oct 2099 07:28:00 GMT"}
+        for path in ("/", "/sw.js"):
+            fresh = client.get(path, headers={"accept": "text/html", **since})
+            assert fresh.status_code == 200 and fresh.text, path
+            assert "etag" not in fresh.headers and "last-modified" not in fresh.headers, path
+            assert fresh.headers["cache-control"] == "no-cache", path
+        assert client.get("/assets/index-abc123.js", headers=since).status_code in (200, 304)
         assert client.get("/api/v1/health").json()["api"] == "ok"  # API routes come first
         missing = client.get("/assets/missing-0000.js")  # e.g. a chunk of an older deployment
         assert missing.status_code == 404 and "immutable" not in missing.headers.get("cache-control", "")

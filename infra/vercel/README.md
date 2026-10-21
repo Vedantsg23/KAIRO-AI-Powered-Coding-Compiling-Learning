@@ -1,13 +1,13 @@
 # KAIRO on Vercel (no Docker)
 
 The live site runs on Vercel's free Hobby plan and a free Supabase project.
-There is no Docker host and no server to keep running: the web app is served
-from Vercel's CDN, the API is one Python function, submitted code runs in a
-Vercel Sandbox micro-VM, Saarthi uses Vercel AI Gateway, and accounts live in
-Supabase.
+There is no Docker host and no server to keep running: the API is one Python
+function that also serves the web app (its hashed files are cached by browsers
+and Vercel's CDN), submitted code runs in a Vercel Sandbox micro-VM, Saarthi
+uses Google's Gemini API or Vercel AI Gateway, and accounts live in Supabase.
 
 ```
-Browser ──► Vercel CDN: the web app (apps/web/dist), installable as an app (PWA)
+Browser ──► Vercel CDN: the web app (apps/web/dist, hashed files cached for a year), installable as an app (PWA)
    │
    ├──► Vercel Function, Python, region bom1 (Mumbai): services/api/app/main.py (FastAPI)
    │       ├──► Vercel Sandbox "kairo-runner": a micro-VM started from the runner snapshot;
@@ -25,7 +25,7 @@ Vercel Cron, daily ──► GET /api/v1/system/keepalive ──► Supabase kee
 
 | Part | `make` / Docker Compose | Vercel |
 |---|---|---|
-| Web app | Vite dev server, or served by the API container | Built by `vercel.json`'s build command and served from the CDN (`app.frontend()` in `main.py`, promoted at build time) |
+| Web app | Vite dev server, or served by the API container | Built by `vercel.json`'s build command and served by the function (`app.frontend()` in `main.py`); hashed files are cached for a year, pages never go stale (`WebAppCaching`) |
 | API | uvicorn | One Python function (Fluid compute), at most 300 s per request |
 | Code runner | `services/runner` starts Docker containers | `VercelSandboxRunner` (`services/api/app/queue/vercel_sandbox.py`) sends each job to the `kairo-runner` VM, where `kairo_exec.py` gives every step what the Docker runner gives a container (the table at the top of `runner/kairo_exec.py`) |
 | A run | `POST /executions`, then polling | `POST /executions/run` streams the run's snapshots in the same request, because the next request may reach another instance |
@@ -85,9 +85,16 @@ Environment Variables, then redeploy):
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | `public-settings.json` | Another Supabase project. |
 | `CC_VERCEL_SANDBOX_NAME` | `kairo-runner` | Another named sandbox. |
 
-`VERCEL_FASTAPI_STATIC_CDN=1` is set for the build in `vercel.json`; it tells
-Vercel's FastAPI builder to serve the web app's files from the CDN. If it were
-missing, the function would serve them itself (slower, same pages).
+`VERCEL_FASTAPI_STATIC_CDN=1` is set for the build in `vercel.json`, asking
+Vercel's FastAPI builder to move the web app's files to the CDN. On the live
+site (October 2026) the function still serves them, so `WebAppCaching` in
+`main.py` sets the caching: files under `/assets/` (content-hashed names) may
+be kept for a year by browsers and the CDN, and everything else (the page,
+`sw.js`, the manifest, icons) is sent whole with `Cache-Control: no-cache` and
+no `ETag` or `Last-Modified`. Vercel gives every file of a function the same
+modification time, so those validators would match the previous deployment's
+files of the same size, and browsers would keep showing the old app after a
+deployment.
 
 ## The runner snapshot
 
