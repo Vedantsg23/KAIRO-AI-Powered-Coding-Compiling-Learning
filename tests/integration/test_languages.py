@@ -66,8 +66,11 @@ def test_memory_hog_is_stopped(execute, lang):
     out = execute(lang, PROGRAMS[lang]["memory"])
     # Either the sandbox kills it at the memory limit, or the language runtime
     # reports its own out-of-memory error first (Java's -Xmx, PHP's memory_limit).
+    # Docker records the kernel's OOM kill from a separate event; the runner waits
+    # for it (runner/sandbox.py: _settle_oom_flag), but should Docker never deliver
+    # it, the program has still been stopped, by SIGKILL, and is reported as killed.
     assert out.state in {"MEMORY_LIMIT", "RUNTIME_ERROR"}, (out.state, out.codes)
-    assert set(out.codes) & ({"LIMIT_MEMORY"} | PROGRAMS[lang]["memory_codes"]), out.codes
+    assert set(out.codes) & ({"LIMIT_MEMORY", "RUNTIME_KILLED"} | PROGRAMS[lang]["memory_codes"]), out.codes
     assert out.seconds < 30
 
 

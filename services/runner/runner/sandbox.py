@@ -235,7 +235,7 @@ class Sandbox:
             wall_ms = int((time.monotonic() - requested) * 1000)
 
             container.reload()
-            state = container.attrs.get("State", {})
+            state = _settle_oom_flag(container, container.attrs.get("State", {}), exit_code, captured)
             return _step_result(step.name, exit_code, state, captured, wall_ms)
         finally:
             if sock is not None:
@@ -332,6 +332,33 @@ def _kill_quietly(container) -> None:
         container.kill()
     except docker.errors.APIError:
         pass  # already exited
+
+
+# Docker learns about an out-of-memory kill from an event of its own, and that
+# event can arrive a moment after the exit: inspected straight away, a program
+# the kernel killed at the memory limit may still show OOMKilled=false (seen on
+# GitHub's runners, for Go and Pascal memory hogs). A step that died of SIGKILL
+# without the runner killing it (no timeout, no output limit) is therefore
+# inspected again for a short while before it is reported as merely "killed".
+OOM_SETTLE_S = 1.0
+_OOM_POLL_S = 0.05
+
+
+def _settle_oom_flag(container, state: dict, exit_code: int | None, captured: _Captured) -> dict:
+    """The container's final state, once Docker has had a moment to record an OOM kill."""
+    if state.get("OOMKilled") or captured.stop_reason is not None or exit_code != 128 + signals.SIGKILL:
+        return state
+    deadline = time.monotonic() + OOM_SETTLE_S
+    while time.monotonic() < deadline:
+        time.sleep(_OOM_POLL_S)
+        try:
+            container.reload()
+        except docker.errors.APIError:
+            break
+        state = container.attrs.get("State", {})
+        if state.get("OOMKilled"):
+            break
+    return state
 
 
 def _wait_for_exit(container, deadline: float) -> tuple[int | None, bool]:
