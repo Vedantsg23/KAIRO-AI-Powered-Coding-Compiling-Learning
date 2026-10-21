@@ -3,8 +3,8 @@
  * fallback when the model cannot answer): concept explanations and short,
  * correct how-to programs for the most used languages.
  *
- * Hand-written reference text, not AI output; answers built from it are
- * labelled "Offline Saarthi".
+ * Hand-written reference text, not AI output; chat messages built from it are
+ * marked `offline` (see assistant/offline.ts).
  */
 
 export interface Concept {

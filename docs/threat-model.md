@@ -50,7 +50,7 @@ On the live site (Vercel) there is no Docker:
 ```text
  browser --(HTTPS, untrusted input)--> API (Vercel Function) --(Vercel API, OIDC token)--> runner VM (Vercel Sandbox, network: deny-all)
     |                                     |                                                   kairo_exec.py: one namespace set + cgroup per step
-    +--(HTTPS, publishable key)--> Supabase (Auth, Postgres with RLS)    +--(HTTPS)--> AI Gateway
+    +--(HTTPS, publishable key)--> Supabase (Auth, Postgres with RLS)    +--(HTTPS)--> AI Gateway / Gemini API
 ```
 
 * Jobs run in a Firecracker micro-VM with **no network at all**, started from
@@ -61,7 +61,10 @@ On the live site (Vercel) there is no Docker:
   a cgroup v2 with memory (no swap), PID and CPU limits (the table at the top of
   `infra/vercel/runner/kairo_exec.py`).
 * The API reaches the VM only through Vercel's API with the deployment's
-  short-lived OIDC token; no long-lived credential exists.
+  short-lived OIDC token; no long-lived credential exists for it. Saarthi uses
+  the same token for AI Gateway; the one optional long-lived key, a Gemini API
+  key, is a *Sensitive* Vercel environment variable that the API sends only to
+  Google's API and never returns.
 * Accounts and their saved work go **directly** between the browser and
   Supabase with the publishable key; Row Level Security limits every row to
   its owner. The API never sees account data.

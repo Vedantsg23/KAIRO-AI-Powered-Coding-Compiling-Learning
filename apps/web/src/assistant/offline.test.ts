@@ -17,9 +17,11 @@ const base: OfflineContext = {
 const ask = (question: string, extra: Partial<OfflineContext> = {}) => offlineAnswer({ ...base, ...extra, question });
 
 describe("offline Saarthi", () => {
-  it("always says it is not an AI model", () => {
-    for (const q of ["hi", "explain pointers", "why does my code fail", "what is the weather", "how do I read input"]) {
-      expect(ask(q)).toMatch(/Offline Saarthi · KAIRO's built-in knowledge, not an AI model/);
+  it("answers only the question: no setup notes or footers", () => {
+    for (const q of ["hi", "explain pointers", "why does my code fail", "what is the weather", "how do I read input", "explain my code"]) {
+      const answer = ask(q);
+      expect(answer.trim().length).toBeGreaterThan(20);
+      expect(answer).not.toMatch(/full AI answers|Offline Saarthi|offline mode|AI model|CC_AI_PROVIDER|\.env|Gemini|Ollama/i);
     }
   });
 
@@ -80,8 +82,9 @@ describe("offline Saarthi", () => {
     expect(ask("explain my code", { metrics })).toMatch(/reads input/);
   });
 
-  it("says what it cannot do, and how to connect a model", () => {
-    expect(ask("what is the capital of France")).toMatch(/offline mode/);
-    expect(ask("what is the capital of France")).toMatch(/Gemini|Ollama/);
+  it("says what it can help with when it has no answer", () => {
+    const answer = ask("what is the capital of France");
+    expect(answer).toMatch(/I don't have an answer to that one yet/);
+    expect(answer).toMatch(/explain a concept/);
   });
 });

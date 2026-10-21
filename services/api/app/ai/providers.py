@@ -12,6 +12,9 @@ Two wire formats cover the useful options:
   gateway    Vercel AI Gateway, which speaks the OpenAI format for many model
              vendors. On Vercel it authenticates with the deployment's OIDC
              token (renewed by the platform), so no key is stored anywhere.
+  gemini     Google's Gemini API through its OpenAI-compatible endpoint, with a
+             key from Google AI Studio (GEMINI_API_KEY; the free tier needs no
+             card).
 
 Free-form answers can also be streamed (stream()), so Saarthi's chat shows
 the answer while it is being written, like ChatGPT or Copilot.
@@ -49,6 +52,10 @@ GATEWAY_URL = "https://ai-gateway.vercel.sh/v1"
 # account. Newer models such as google/gemini-3.5-flash-lite need paid AI
 # Gateway credit; choose one with CC_AI_MODEL.
 DEFAULT_GATEWAY_MODEL = "google/gemini-2.5-flash-lite"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+# Gemini 3.5 Flash Lite: a stable model on the Gemini API's free tier (Google's
+# free-tier model list, October 2026). Override with CC_AI_MODEL.
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 # What students see when AI Gateway refuses the deployment (HTTP 401/403): the
 # team has no AI Gateway credit turned on, or the free credit does not cover
 # the model. The gateway's own reason goes to the server log.
@@ -103,7 +110,40 @@ def choose_provider(settings: ApiSettings, http: httpx.AsyncClient,
     """The configured provider, or the reason Saarthi is switched off.
 
     oidc_token returns the deployment's current Vercel OIDC token (gateway only).
+    Gemini and AI Gateway back each other up when both are available (a Gemini
+    key, and AI Gateway on Vercel or with AI_GATEWAY_API_KEY): when the first one
+    cannot answer (busy, out of free quota, refused), the other one does.
     """
+    choice = _configured_provider(settings, http, oidc_token)
+    backup = _backup_provider(settings, http, oidc_token, choice.provider) if settings.ai_backup else None
+    if choice.provider is None or backup is None:
+        return choice
+    return ProviderChoice(FallbackProvider([choice.provider, backup]), None)
+
+
+def _gemini_key(settings: ApiSettings) -> str:
+    return settings.gemini_api_key.get_secret_value().strip() if settings.gemini_api_key else ""
+
+
+def _gateway_key(settings: ApiSettings, oidc_token: Callable[[], str | None] | None) -> str | Callable[[], str | None] | None:
+    fixed = settings.ai_gateway_api_key.get_secret_value().strip() if settings.ai_gateway_api_key else ""
+    return fixed or oidc_token
+
+
+def _backup_provider(settings: ApiSettings, http: httpx.AsyncClient,
+                     oidc_token: Callable[[], str | None] | None, primary: Provider | None) -> Provider | None:
+    """The other of Gemini and AI Gateway, with its own key and default model, if it is available."""
+    if primary is not None and primary.name == "gemini":
+        gateway_key = _gateway_key(settings, oidc_token)
+        if gateway_key:
+            return OpenAICompatibleProvider(http, gateway_key, DEFAULT_GATEWAY_MODEL, GATEWAY_URL, name="gateway")
+    if primary is not None and primary.name == "gateway" and _gemini_key(settings):
+        return OpenAICompatibleProvider(http, _gemini_key(settings), DEFAULT_GEMINI_MODEL, GEMINI_URL, name="gemini")
+    return None
+
+
+def _configured_provider(settings: ApiSettings, http: httpx.AsyncClient,
+                         oidc_token: Callable[[], str | None] | None) -> ProviderChoice:
     if settings.ai_provider == "none":
         return ProviderChoice(None, "Saarthi is switched off on this server (CC_AI_PROVIDER=none).")
     if settings.ai_provider == "anthropic":
@@ -121,6 +161,13 @@ def choose_provider(settings: ApiSettings, http: httpx.AsyncClient,
         key: str | Callable[[], str | None] = fixed or oidc_token  # type: ignore[assignment]
         return ProviderChoice(OpenAICompatibleProvider(http, key, settings.ai_model or DEFAULT_GATEWAY_MODEL,
                                                        settings.ai_base_url or GATEWAY_URL, name="gateway"), None)
+    if settings.ai_provider == "gemini":
+        secret = settings.ai_api_key or settings.gemini_api_key
+        gemini_key = secret.get_secret_value().strip() if secret is not None else ""
+        if not gemini_key:
+            return ProviderChoice(None, "No Gemini API key is set on the server (GEMINI_API_KEY).")
+        return ProviderChoice(OpenAICompatibleProvider(http, gemini_key, settings.ai_model or DEFAULT_GEMINI_MODEL,
+                                                       settings.ai_base_url or GEMINI_URL, name="gemini"), None)
     # OpenAI-compatible
     key = settings.ai_api_key or settings.openai_api_key
     key_value = key.get_secret_value().strip() if key is not None else ""
@@ -140,12 +187,17 @@ def with_model(provider: Provider | None, model: str) -> Provider | None:
         return AnthropicProvider(provider._http, provider._key, model, provider._base_url)
     if isinstance(provider, OpenAICompatibleProvider):
         return OpenAICompatibleProvider(provider._http, provider._key, model, provider._base_url, name=provider.name)
+    if isinstance(provider, FallbackProvider):  # the model belongs to the first provider
+        return FallbackProvider([with_model(provider.providers[0], model) or provider.providers[0],
+                                 *provider.providers[1:]])
     return provider
 
 
 # Anything in a provider's error text that looks like a key or token (a JWT such
-# as the OIDC token, or an sk-/vck- style key) is removed before it is logged.
-_SECRET_LIKE = re.compile(r"eyJ[\w-]{8,}\.[\w-]+\.[\w-]*|\b(?:sk|vck|key)[-_][\w-]{8,}", re.IGNORECASE)
+# as the OIDC token, a Google "AIza..." key, or an sk-/vck- style key) is removed
+# before it is logged.
+_SECRET_LIKE = re.compile(r"eyJ[\w-]{8,}\.[\w-]+\.[\w-]*|\bAIza[\w-]{20,}|\b(?:sk|vck|key)[-_][\w-]{8,}",
+                          re.IGNORECASE)
 
 
 def _error_reason(response: httpx.Response) -> str:
@@ -158,9 +210,11 @@ def _error_reason(response: httpx.Response) -> str:
         payload = response.json()
     except ValueError:
         return ""
+    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        payload = payload[0]  # Google's APIs may wrap the error in a list
     error = payload.get("error") if isinstance(payload, dict) else None
     if isinstance(error, dict):
-        parts = [str(error[k]) for k in ("type", "code", "message") if error.get(k)]
+        parts = [str(error[k]) for k in ("type", "status", "code", "message") if error.get(k)]
     elif isinstance(error, str):
         parts = [error]
     elif isinstance(payload, dict) and isinstance(payload.get("message"), str):
@@ -179,7 +233,7 @@ def _raise_for_status(response: httpx.Response, provider: str) -> None:
     retry_s = int(float(retry)) if retry and re.fullmatch(r"\d+(?:\.\d+)?", retry) else None
     reason = _error_reason(response)
     log.warning("%s answered HTTP %s%s", provider, status, f": {reason}" if reason else "")
-    if status in (401, 403):
+    if status in (401, 403) or (status == 400 and "api key" in reason.lower()):  # Google answers 400 to a bad key
         if provider == "gateway":
             raise ProviderError(GATEWAY_REFUSED)
         raise ProviderError("The AI provider rejected the server's API key. Ask your administrator to check it.")
@@ -323,6 +377,14 @@ class OpenAICompatibleProvider:
         except httpx.HTTPError as exc:
             raise ProviderError("The server could not reach the AI server.") from exc
 
+    async def _post(self, body: dict, headers: dict[str, str]) -> httpx.Response:
+        try:
+            return await self._http.post(self._url, json=body, headers=headers)
+        except httpx.TimeoutException as exc:
+            raise ProviderError("The AI server took too long to answer. Try again.") from exc
+        except httpx.HTTPError as exc:
+            raise ProviderError("The server could not reach the AI server.") from exc
+
     async def complete(self, *, system: str, messages: list[dict], max_tokens: int,
                        tool: ToolSpec | None = None) -> Completion:
         if tool is not None:
@@ -333,12 +395,14 @@ class OpenAICompatibleProvider:
         if tool is not None:
             body["response_format"] = {"type": "json_object"}
         headers = self._headers()
-        try:
-            response = await self._http.post(self._url, json=body, headers=headers)
-        except httpx.TimeoutException as exc:
-            raise ProviderError("The AI server took too long to answer. Try again.") from exc
-        except httpx.HTTPError as exc:
-            raise ProviderError("The server could not reach the AI server.") from exc
+        response = await self._post(body, headers)
+        if (response.status_code == 400 and "response_format" in body
+                and "api key" not in _error_reason(response).lower()):
+            # Not every OpenAI-compatible server offers JSON mode: ask once more without
+            # it (the prompt already asks for one JSON object, and the answer is checked).
+            log.info("%s refused JSON mode; asking again without it", self.name)
+            body = {k: v for k, v in body.items() if k != "response_format"}
+            response = await self._post(body, headers)
         _raise_for_status(response, self.name)
         try:
             payload = response.json()
@@ -358,3 +422,45 @@ class OpenAICompatibleProvider:
             raise ProviderError("The AI server did not return a JSON object. Try again.")
         result.data = data
         return result
+
+
+class FallbackProvider:
+    """The first provider answers; when it cannot (before writing anything), the next one does.
+
+    Its name and model are the first provider's. When none can answer, students
+    see the first provider's error: that is the provider the site is set up with.
+    """
+
+    def __init__(self, providers: list[Provider]) -> None:
+        self.providers = providers
+        self.name = providers[0].name
+        self.model = providers[0].model
+
+    async def complete(self, *, system: str, messages: list[dict], max_tokens: int,
+                       tool: ToolSpec | None = None) -> Completion:
+        first: ProviderError | None = None
+        for provider in self.providers:
+            try:
+                return await provider.complete(system=system, messages=messages, max_tokens=max_tokens, tool=tool)
+            except ProviderError as exc:
+                first = first or exc
+                log.warning("%s could not answer (%s)", provider.name, exc.public)
+        assert first is not None
+        raise first
+
+    async def stream(self, *, system: str, messages: list[dict], max_tokens: int) -> AsyncIterator[str]:
+        first: ProviderError | None = None
+        for provider in self.providers:
+            wrote = False
+            try:
+                async for piece in provider.stream(system=system, messages=messages, max_tokens=max_tokens):
+                    wrote = True
+                    yield piece
+                return
+            except ProviderError as exc:
+                if wrote:
+                    raise  # another model cannot finish half of this one's answer
+                first = first or exc
+                log.warning("%s could not answer (%s)", provider.name, exc.public)
+        assert first is not None
+        raise first

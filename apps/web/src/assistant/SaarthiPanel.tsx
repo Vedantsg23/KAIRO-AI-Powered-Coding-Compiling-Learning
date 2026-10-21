@@ -922,7 +922,7 @@ function ChatThread({ saarthi }: { saarthi: SaarthiApi }) {
             {m.content}
           </li>
         ) : (
-          <li key={m.id} className="k-chat-in flex max-w-full gap-2" data-streaming={m.streaming || undefined}>
+          <li key={m.id} className="k-chat-in flex max-w-full gap-2" data-streaming={m.streaming || undefined} data-offline={m.offline || undefined}>
             <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border border-ai/40 bg-ai/12 font-mono text-[10px] font-bold text-ai-fg" aria-hidden>
               S
             </span>
@@ -945,12 +945,6 @@ function ChatThread({ saarthi }: { saarthi: SaarthiApi }) {
                   <i />
                   <i />
                 </span>
-              )}
-              {!m.streaming && m.grounded && m.grounded !== "none" && (
-                <p className="mt-1 font-mono text-[10px] text-faint">based on your {m.grounded === "execution" ? "last run" : "current code"} · AI answer, check by running</p>
-              )}
-              {m.offline && (
-                <p className="mt-1 font-mono text-[10px] text-faint" data-testid="offline-answer">offline Saarthi · built-in knowledge · check by running</p>
               )}
             </div>
           </li>

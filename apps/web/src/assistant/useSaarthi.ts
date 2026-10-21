@@ -50,7 +50,7 @@ export interface SaarthiApi {
    * by word; without one (or when it cannot answer) offline Saarthi answers
    * from the context.
    */
-  ask(args: AskArgs, offline?: () => Omit<OfflineContext, "question" | "reason">): Promise<void>;
+  ask(args: AskArgs, offline?: () => Omit<OfflineContext, "question">): Promise<void>;
   /** Stop the answer being written. */
   stop(): void;
   /** Start a new conversation. */
@@ -87,6 +87,10 @@ export function useSaarthi(): SaarthiApi {
   const fixRef = useRef(fix);
   fixRef.current = fix;
   const answering = useRef<AbortController | null>(null);
+  /** The answer the student stopped with the Stop button (not by asking again). */
+  const stoppedByUser = useRef<AbortController | null>(null);
+  /** Counts questions, so only the latest one clears the busy state. */
+  const askTurn = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,6 +158,7 @@ export function useSaarthi(): SaarthiApi {
   const ask = useCallback<SaarthiApi["ask"]>(
     async ({ question, languageId, executionId, sourceHash, source, evidence, diagnosticId }, offline) => {
       answering.current?.abort();
+      const turn = ++askTurn.current;
       const history: ChatTurn[] = chatRef.current
         .filter((m) => !m.error && !m.offline && !m.streaming && m.content.trim())
         .slice(-8)
@@ -164,9 +169,10 @@ export function useSaarthi(): SaarthiApi {
       setError(null);
       const answerOffline = (reason?: string, replace?: number) => {
         if (!offline) return false;
-        const content = offlineAnswer({ ...offline(), question, reason });
-        const note = reason ? `_The AI model did not answer (${reason}), so here is what I know offline._\n\n` : "";
-        if (replace !== undefined) update(replace, (m) => ({ ...m, content: note + content, offline: true, streaming: false }));
+        // The chat shows only the answer; why the AI model did not answer goes to the console.
+        if (reason) console.info(`Saarthi answered from built-in knowledge (${reason})`);
+        const content = offlineAnswer({ ...offline(), question });
+        if (replace !== undefined) update(replace, (m) => ({ ...m, content, offline: true, streaming: false }));
         else setChat((all) => [...all, { id: nextId++, role: "assistant", content, offline: true }]);
         return true;
       };
@@ -184,62 +190,69 @@ export function useSaarthi(): SaarthiApi {
         const controller = new AbortController();
         answering.current = controller;
         const body: AskRequest = { question, languageId, executionId, sourceHash, source, history, evidence, diagnosticId };
-        // Pieces arrive many times a second: collect them and paint once per frame.
-        let buffer = "";
-        let written = "";
-        let frame = 0;
-        const flush = () => {
-          frame = 0;
-          if (!buffer) return;
-          const piece = buffer;
-          buffer = "";
-          update(id, (m) => ({ ...m, content: m.content + piece }));
-        };
+        const reveal = smoothReveal((text) => update(id, (m) => ({ ...m, content: text })));
         let failed: string | null = null;
+        let aborted = false;
         try {
           await api.askStream(
             body,
             (event) => {
               if (event.type === "start") update(id, (m) => ({ ...m, grounded: event.groundedOn }));
-              else if (event.type === "delta") {
-                buffer += event.text;
-                written += event.text;
-                if (!frame) frame = requestAnimationFrame(flush);
-              } else if (event.type === "error") failed = event.detail;
+              else if (event.type === "delta") reveal.add(event.text);
+              else if (event.type === "error") failed = event.detail;
             },
             controller.signal,
           );
         } catch (e) {
-          if (e instanceof DOMException && e.name === "AbortError") {
-            if (frame) cancelAnimationFrame(frame);
-            flush();
-            update(id, (m) => ({ ...m, streaming: false, stopped: true }));
-            return;
-          }
-          failed = message(e);
-        } finally {
-          if (answering.current === controller) answering.current = null;
+          if (e instanceof DOMException && e.name === "AbortError") aborted = true;
+          else failed = message(e);
         }
-        if (frame) cancelAnimationFrame(frame);
-        flush();
+        const received = !aborted && !failed;
+        if (received) {
+          // The whole answer is here; let the screen catch up. Stop still works meanwhile.
+          const stopReveal = () => reveal.cancel();
+          controller.signal.addEventListener("abort", stopReveal);
+          await reveal.finish();
+          controller.signal.removeEventListener("abort", stopReveal);
+          aborted = controller.signal.aborted;
+        }
+        if (answering.current === controller) answering.current = null;
+        const written = reveal.text();
+        if (aborted) {
+          // Stop keeps what is on screen. A new question instead finishes an answer
+          // that had fully arrived, and keeps what arrived of one that had not.
+          const byStop = stoppedByUser.current === controller;
+          const shown = reveal.cancel();
+          update(id, (m) => ({
+            ...m,
+            content: byStop ? shown : written,
+            streaming: false,
+            stopped: byStop || !received,
+          }));
+          return;
+        }
+        reveal.cancel();
         if (failed) {
           // Nothing written yet: offline Saarthi steps in. Otherwise keep what was written and say why it ended.
           if (!written.trim() && answerOffline(failed, id)) return;
           if (!written.trim()) update(id, (m) => ({ ...m, content: failed!, error: true, streaming: false }));
-          else update(id, (m) => ({ ...m, content: `${m.content}\n\n_(${failed})_`, streaming: false }));
+          else update(id, (m) => ({ ...m, content: `${written}\n\n_(${failed})_`, streaming: false }));
           return;
         }
-        update(id, (m) => ({ ...m, streaming: false }));
+        update(id, (m) => ({ ...m, content: written, streaming: false }));
       } catch (e) {
         if (!answerOffline(message(e))) setChat((all) => [...all, { id: nextId++, role: "assistant", content: message(e), error: true }]);
       } finally {
-        setPending((p) => (p === "ask" ? null : p));
+        if (askTurn.current === turn) setPending((p) => (p === "ask" ? null : p));
       }
     },
     [update],
   );
 
-  const stop = useCallback(() => answering.current?.abort(), []);
+  const stop = useCallback(() => {
+    stoppedByUser.current = answering.current;
+    answering.current?.abort();
+  }, []);
 
   const newChat = useCallback(() => {
     answering.current?.abort();
@@ -279,5 +292,70 @@ export function useSaarthi(): SaarthiApi {
       setVerdict(null);
       setError(null);
     }, []),
+  };
+}
+
+/**
+ * Shows a streamed answer the way ChatGPT and Copilot do: whole words, a few
+ * at a time, at an even pace, catching up faster when far behind. Models send
+ * their answer in pieces of very different sizes (Gemini sends a sentence or
+ * more at a time), so painting each piece as it arrives looks jumpy. With
+ * reduced motion, or in a hidden tab, everything received is shown at once.
+ */
+export function smoothReveal(paint: (text: string) => void) {
+  let received = "";
+  let shown = 0;
+  let scheduled = false;
+  let cancelled = false;
+  let ended = false;
+  let resolveFinished: () => void = () => {};
+  const finished = new Promise<void>((resolve) => (resolveFinished = resolve));
+  const instant = () =>
+    document.hidden ||
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true ||
+    document.querySelector<HTMLElement>(".cd-app")?.dataset.motion === "off";
+  const tick = () => {
+    scheduled = false;
+    if (cancelled) return;
+    if (shown < received.length) {
+      let next = received.length;
+      if (!instant()) {
+        next = shown + Math.max(3, Math.ceil((received.length - shown) / 24));
+        const space = received.slice(next).search(/\s/);
+        next = space === -1 ? received.length : next + space;
+      }
+      shown = Math.min(next, received.length);
+      paint(received.slice(0, shown));
+    }
+    if (shown < received.length) schedule();
+    else if (ended) resolveFinished();
+  };
+  const schedule = () => {
+    if (scheduled || cancelled) return;
+    scheduled = true;
+    // Animation frames pause in a hidden tab; a timer still runs there.
+    if (document.hidden) window.setTimeout(tick, 50);
+    else window.requestAnimationFrame(tick);
+  };
+  return {
+    add(piece: string) {
+      received += piece;
+      schedule();
+    },
+    /** Everything received so far. */
+    text: () => received,
+    /** Resolves once everything received is on screen, or the reveal is cancelled. */
+    finish(): Promise<void> {
+      ended = true;
+      if (shown >= received.length) resolveFinished();
+      else schedule();
+      return finished;
+    },
+    /** Stops revealing and returns what is on screen. */
+    cancel(): string {
+      cancelled = true;
+      resolveFinished();
+      return received.slice(0, shown);
+    },
   };
 }

@@ -5,7 +5,8 @@
  * metrics, and the built-in concept and how-to library (assistant/knowledge.ts).
  *
  * Used when the server has no AI model configured, when the model cannot be
- * reached, and in the offline demo. Every answer says it is not AI.
+ * reached, and in the offline demo. The chat shows only the answer: no setup
+ * notes or footers (the message is marked `offline` for the panel and tests).
  */
 import type { Diagnostic, Execution } from "../api/types";
 import { noteFor } from "../diagnostics/notes";
@@ -26,11 +27,7 @@ export interface OfflineContext {
   concept: ConceptInfo | null;
   metrics: CodeMetrics | null;
   stdin: string;
-  /** Why the AI model is not answering (shown once, briefly). */
-  reason?: string;
 }
-
-const FOOTER = "\n\n_Offline Saarthi · KAIRO's built-in knowledge, not an AI model._";
 
 const fence = (lang: string, code: string) => "```" + (lang === "react" ? "jsx" : lang) + "\n" + code + "\n```";
 
@@ -136,7 +133,7 @@ function codeSummary(ctx: OfflineContext): string {
     bits.push(m.printsOutput ? "It **prints output** to the terminal." : "It never prints anything, so a run will show no output.");
   }
   if (ctx.concept?.inFile?.length) bits.push(`Concepts it uses: ${ctx.concept.inFile.join(", ")}.`);
-  bits.push("For a line-by-line explanation of what it does, connect an AI model (see below) or ask me about one concept at a time.");
+  bits.push("Ask me about any concept in it for a closer look.");
   return bits.join(" ");
 }
 
@@ -149,15 +146,12 @@ function complexityAnswer(ctx: OfflineContext): string {
     .join("\n")}\n\nThese are estimates: a loop that stops early, or recursion that halves n, is faster than this count suggests.`;
 }
 
-const AI_HELP =
-  "To get full AI answers, the server needs an AI model: set `CC_AI_PROVIDER` and a key in `.env` (free options: a Google Gemini API key, or Ollama running on your computer). See docs/saarthi.md.";
-
-/** Answer a question without an AI model. Always returns Markdown text. */
+/** Answer a question without an AI model. Always returns Markdown text: only the answer. */
 export function offlineAnswer(ctx: OfflineContext): string {
   const q = normalise(ctx.question);
   let body: string;
   if (/^ (hi+|hello|hey|hlo|namaste|namaskar|hii+|good (morning|afternoon|evening)|yo) /.test(q) && q.trim().split(" ").length <= 4) {
-    body = `Hi! I'm **Saarthi**, your guide in KAIRO. Right now I'm answering from KAIRO's built-in knowledge (no AI model is connected), and I can still:\n\n- explain the problems in your code as you type, and the errors of your last run;\n- explain concepts (try "explain pointers", "what is recursion", "phases of a compiler");\n- show how to do common tasks in ${ctx.languageName} ("how do I read input", "reverse a string", "sort an array");\n- summarise your program and estimate its time complexity.\n\nWhat would you like to do?`;
+    body = `Hi! I'm **Saarthi**, your guide in KAIRO. I can:\n\n- explain the problems in your code as you type, and the errors of your last run;\n- explain concepts (try "explain pointers", "what is recursion", "phases of a compiler");\n- show how to do common tasks in ${ctx.languageName} ("how do I read input", "reverse a string", "sort an array");\n- summarise your program and estimate its time complexity.\n\nWhat would you like to do?`;
   } else if (/ (complexity|big o|big-o|time complexity|how fast|efficient) /.test(q)) {
     body = complexityAnswer(ctx);
   } else if (/ (what does (my|this|the) (code|program)|explain (my|this|the) (code|program)|summar|what is my code doing) /.test(q)) {
@@ -177,10 +171,9 @@ export function offlineAnswer(ctx: OfflineContext): string {
       const fallbackHowto = howtoAnswer(q, ctx);
       if (fallbackHowto) body = fallbackHowto;
       else {
-        body = `I'm in offline mode, so I can only answer from KAIRO's built-in knowledge, and I don't have an answer to that one. I can:\n\n- find and explain problems in your code ("why does my code fail?");\n- explain a concept ("explain arrays", "what is a segmentation fault");\n- show how to do a task in ${ctx.languageName} ("how do I find the largest number?");\n- summarise your program or estimate its complexity.\n\n${AI_HELP}`;
-        return body + FOOTER;
+        body = `I don't have an answer to that one yet. Here is what I can help with:\n\n- find and explain problems in your code ("why does my code fail?");\n- explain a concept ("explain arrays", "what is a segmentation fault");\n- show how to do a task in ${ctx.languageName} ("how do I find the largest number?");\n- summarise your program or estimate its complexity.`;
       }
     }
   }
-  return body + (ctx.reason ? `\n\n${AI_HELP}` : "") + FOOTER;
+  return body;
 }

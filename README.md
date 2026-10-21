@@ -1037,9 +1037,10 @@ format messy code; open the **notebook** from the left bar and press **Shift+Ent
 | `RUNNER_WORKERS` | `4` | Sandboxes that may run at once (the API dispatches the same number) |
 | `WEB_PORT` | `8080` | Port for the app and API with Docker Compose |
 | `WEB_BIND` | `127.0.0.1` | Interface to listen on. `0.0.0.0` only on a trusted network |
-| `CC_AI_PROVIDER` | `anthropic` (`gateway` on Vercel) | `anthropic`, `openai` (any OpenAI-compatible server), `gateway` (Vercel AI Gateway) or `none` |
+| `CC_AI_PROVIDER` | `anthropic` (`gateway` on Vercel; `gemini` when `GEMINI_API_KEY` is set) | `anthropic`, `openai` (any OpenAI-compatible server), `gateway` (Vercel AI Gateway), `gemini` (Google's Gemini API) or `none` |
 | `ANTHROPIC_API_KEY` | empty | Key for Claude. Without it Saarthi is off and everything else works |
-| `CC_AI_MODEL` | `claude-haiku-4-5-20251001` (`google/gemini-2.5-flash-lite` with `gateway`) | Model id |
+| `GEMINI_API_KEY` | empty | A free key from Google AI Studio (no card); on its own it switches Saarthi to the Gemini API (on Vercel AI Gateway stays as the backup) |
+| `CC_AI_MODEL` | `claude-haiku-4-5-20251001` (`google/gemini-2.5-flash-lite` with `gateway`, `gemini-3.5-flash-lite` with `gemini`) | Model id |
 | `CC_AI_BASE_URL` | empty | For `openai`: e.g. `http://127.0.0.1:11434/v1` (Ollama) |
 | `CC_AI_API_KEY` or `OPENAI_API_KEY` | empty | For `openai` servers that need a key (Ollama does not) |
 | `CC_AI_REQUESTS_PER_MINUTE` / `_PER_DAY` | `10` / `150` | Saarthi limits per client (IP address) |

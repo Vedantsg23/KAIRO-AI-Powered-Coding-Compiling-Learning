@@ -3,8 +3,7 @@
 Saarthi explains problems, proposes small fixes and answers questions, inside
 KAIRO. The AI model is optional: without one, the editor, the live analysis,
 compiling and running all work, and Saarthi still answers from KAIRO's
-built-in knowledge (see [Offline Saarthi](#offline-saarthi-no-model)), clearly
-marked as not AI.
+built-in knowledge (see [Offline Saarthi](#offline-saarthi-no-model)).
 
 ## What a student can do
 
@@ -109,9 +108,11 @@ Set on the API process (never in the browser; `.env` is not committed):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CC_AI_PROVIDER` | `gateway` on Vercel, otherwise `anthropic` | `anthropic`, `openai` (any OpenAI-compatible server), `gateway` (Vercel AI Gateway) or `none` |
+| `CC_AI_PROVIDER` | `gemini` when `GEMINI_API_KEY` is set, otherwise `gateway` on Vercel and `anthropic` elsewhere | `anthropic`, `openai` (any OpenAI-compatible server), `gateway` (Vercel AI Gateway), `gemini` (Google's Gemini API) or `none` |
 | `ANTHROPIC_API_KEY` | empty | Key for Claude. Without it Saarthi is off. |
-| `CC_AI_MODEL` | `claude-haiku-4-5-20251001`; `google/gemini-2.5-flash-lite` with `gateway` | Model id, e.g. `claude-sonnet-5` for deeper answers |
+| `GEMINI_API_KEY` | empty | A key from Google AI Studio (free tier, no card); on its own it switches Saarthi to the Gemini API |
+| `CC_AI_BACKUP` | `true` | With both a Gemini key and AI Gateway (on Vercel, or with `AI_GATEWAY_API_KEY`), each answers when the other cannot (busy, out of free quota, refused) |
+| `CC_AI_MODEL` | `claude-haiku-4-5-20251001`; `google/gemini-2.5-flash-lite` with `gateway`; `gemini-3.5-flash-lite` with `gemini` | Model id, e.g. `claude-sonnet-5` for deeper answers |
 | `CC_AI_BASE_URL` | empty | For `openai`: e.g. `http://127.0.0.1:11434/v1` (Ollama) |
 | `CC_AI_API_KEY` or `OPENAI_API_KEY` | empty | For `openai` servers that need a key (Ollama does not) |
 | `CC_AI_TIMEOUT_S` | 45 | Per request |
@@ -141,9 +142,10 @@ for a class but covers only a limited set of models; the default,
 shows in its *Free AI Gateway Credit* column whether the free credit covers it
 (newer models such as `google/gemini-3.5-flash-lite` need paid credit). When
 the gateway refuses a request (no credit, or a model the credit does not
-cover), students see "Saarthi's AI service (Vercel AI Gateway) refused the
-request" and the function log shows the gateway's reason; the quick notes,
-fixes and runs keep working. Outside Vercel the gateway can be used with
+cover), Explain and Fix say "Saarthi's AI service (Vercel AI Gateway) refused
+the request", the chat answers from KAIRO's built-in knowledge, and the
+function log shows the gateway's reason. No card? Use a free Gemini API key
+instead (below). Outside Vercel the gateway can be used with
 `AI_GATEWAY_API_KEY`.
 
 ### Claude
@@ -163,6 +165,26 @@ CC_AI_PROVIDER=openai CC_AI_BASE_URL=http://127.0.0.1:11434/v1 CC_AI_MODEL=llama
 container can reach the host.) Small local models follow the answer format
 less reliably; rejected answers show "please try again".
 
+### Google Gemini API (free key, no card)
+
+Set `GEMINI_API_KEY` to a key from Google AI Studio (aistudio.google.com →
+**Get API key** → **Create API key**; the free tier needs no card) and Saarthi
+uses Google's Gemini API, with `gemini-3.5-flash-lite` unless `CC_AI_MODEL`
+names another model. Nothing else is needed: the key alone chooses the
+`gemini` provider (unless `CC_AI_PROVIDER` names another one), also on Vercel,
+where it goes under Project → Settings → Environment Variables (mark it
+*Sensitive*, then redeploy). Free-tier limits are per Google Cloud project and
+are shown in AI Studio; when they are reached, students see "The AI provider
+is rate-limiting this server". On the free tier Google may use prompts and
+answers to improve its products, so students should not put personal data in
+their questions.
+
+With a Gemini key on Vercel, AI Gateway stays on as the backup (and the other
+way round with `CC_AI_PROVIDER=gateway`): when the first provider cannot answer
+(busy, out of free quota, refused) before it has written anything, the other
+one answers, with its own key and default model. A refusal from both shows the
+first provider's message. `CC_AI_BACKUP=false` turns the backup off.
+
 ### Free hosted models (OpenAI-compatible)
 
 Any server that speaks the OpenAI chat-completions format works with
@@ -172,7 +194,7 @@ before relying on one, and never commit the key.
 
 | Provider | `CC_AI_BASE_URL` | Key variable | Notes |
 |---|---|---|---|
-| Google Gemini API | `https://generativelanguage.googleapis.com/v1beta/openai/` | `CC_AI_API_KEY` (a key from Google AI Studio) | Use a current "Flash" model id from Google's OpenAI-compatibility page. |
+| Google Gemini API | `https://generativelanguage.googleapis.com/v1beta/openai/` | `CC_AI_API_KEY` (a key from Google AI Studio) | Simpler: set only `GEMINI_API_KEY` (above). |
 | Groq | `https://api.groq.com/openai/v1` | `CC_AI_API_KEY` (from the Groq console) | Very fast open models; pick a model id from the console. |
 | OpenRouter | `https://openrouter.ai/api/v1` | `CC_AI_API_KEY` | Many models, some marked free. |
 
@@ -215,8 +237,9 @@ knowledge (`apps/web/src/assistant/offline.ts` and `knowledge.ts`). It can:
 * summarise the program (functions, loops, decisions, input and output) and
   estimate each function's time complexity from its loops and recursion.
 
-Every such answer ends with "Offline Saarthi · KAIRO's built-in knowledge, not
-an AI model", and when a model is configured but failed, the answer says why.
+The chat shows only the answer, like an AI answer, with no setup notes; when a
+model is configured but failed, the reason goes to the browser console and the
+function log (the message is marked `data-offline` in the page).
 
 ## Testing
 

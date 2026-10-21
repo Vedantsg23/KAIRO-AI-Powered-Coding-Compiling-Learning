@@ -13,7 +13,8 @@ Browser ──► Vercel CDN: the web app (apps/web/dist), installable as an app
    │       ├──► Vercel Sandbox "kairo-runner": a micro-VM started from the runner snapshot;
    │       │      kairo_exec.py runs every compile/run step in its own namespaces and cgroup
    │       │      (no network, read-only image, memory, CPU, process and time limits)
-   │       └──► Vercel AI Gateway: Saarthi's model, signed in with the deployment's OIDC token
+   │       ├──► Gemini API: Saarthi's model when GEMINI_API_KEY is set (free key, no card)
+   │       └──► Vercel AI Gateway: Saarthi's model (or the backup), signed in with the deployment's OIDC token
    │
    └──► Supabase (Auth + Postgres with Row Level Security): accounts and saved work
 
@@ -29,7 +30,7 @@ Vercel Cron, daily ──► GET /api/v1/system/keepalive ──► Supabase kee
 | Code runner | `services/runner` starts Docker containers | `VercelSandboxRunner` (`services/api/app/queue/vercel_sandbox.py`) sends each job to the `kairo-runner` VM, where `kairo_exec.py` gives every step what the Docker runner gives a container (the table at the top of `runner/kairo_exec.py`) |
 | A run | `POST /executions`, then polling | `POST /executions/run` streams the run's snapshots in the same request, because the next request may reach another instance |
 | Saarthi's evidence | kept in the API's memory | also signed and handed to the browser (`evidence`), so any instance can answer about the run; see [docs/saarthi.md](../../docs/saarthi.md) |
-| Saarthi's model | an Anthropic or OpenAI-compatible key | AI Gateway with the deployment's OIDC token: no key stored anywhere |
+| Saarthi's model | an Anthropic or OpenAI-compatible key | AI Gateway with the deployment's OIDC token (no key stored anywhere), or a free Gemini key with AI Gateway as the backup |
 | Accounts | optional | Supabase, configured in `infra/vercel/public-settings.json` (public values only) |
 
 The security rules are the same everywhere: submitted code never runs in the
@@ -49,13 +50,24 @@ source snapshot it ran.
    * builds the web app with them (`npm run build:vercel`).
 2. The runner snapshot and the named sandbox `kairo-runner` must exist in the
    project (see below). They are not part of a deployment.
-3. Turn on AI Gateway credit for Saarthi's AI answers: Vercel dashboard →
-   **AI Gateway** → **Use Free AI Gateway Credit** (the card is verified, not
-   charged). The free credit gives $5 every 30 days for a limited set of
-   models; the default model, `google/gemini-2.5-flash-lite`, is one of them.
-   Without credit AI Gateway refuses Saarthi's requests: students see "Saarthi's
-   AI service (Vercel AI Gateway) refused the request", the function log shows
-   the gateway's reason, and the quick notes, fixes and runs keep working.
+3. Give Saarthi an AI model, one of:
+   * **AI Gateway** (the default): Vercel dashboard → **AI Gateway** → **Use
+     Free AI Gateway Credit** and verify a card (it is not charged). The free
+     credit gives $5 every 30 days for a limited set of models; the default
+     model, `google/gemini-2.5-flash-lite`, is one of them. Without it AI
+     Gateway refuses every request ("customer_verification_required" in the
+     function log).
+   * **Gemini API, no card**: create a key at aistudio.google.com (**Get API
+     key**), add it as the environment variable `GEMINI_API_KEY` (mark it
+     *Sensitive*) and redeploy. The key alone switches Saarthi to Google's
+     Gemini API with `gemini-3.5-flash-lite`.
+
+   With both, Gemini answers first and AI Gateway steps in whenever Gemini
+   cannot answer (busy or out of free quota); `CC_AI_BACKUP=false` turns that
+   off.
+
+   While no model answers, Saarthi's chat answers from KAIRO's built-in
+   knowledge, and the quick notes, fixes and runs keep working.
 4. Every push to `main` deploys to production; other branches get preview
    deployments.
 
@@ -66,7 +78,9 @@ Environment Variables, then redeploy):
 |---|---|---|
 | `CC_EVIDENCE_SECRET` | a key generated at build time | A fixed key for signing run evidence and fix tokens (they then stay valid across deployments). Mark it *Sensitive*. |
 | `CRON_SECRET` | none | Vercel sends it with the cron request. Without it, anyone may call the keep-alive, which then does its work at most once every 10 minutes per instance. Mark it *Sensitive*. |
-| `CC_AI_MODEL` | `google/gemini-2.5-flash-lite` (covered by the free credit) | Any model id from AI Gateway's model list. A model page's *Free AI Gateway Credit* column says whether the free credit covers it; newer models such as `google/gemini-3.5-flash-lite` need paid credit. |
+| `GEMINI_API_KEY` | none | A Gemini API key from Google AI Studio (free tier, no card). When set, Saarthi uses Google's Gemini API first and AI Gateway as its backup. Mark it *Sensitive*. |
+| `CC_AI_BACKUP` | `true` | `false`: no backup between Gemini and AI Gateway. |
+| `CC_AI_MODEL` | `google/gemini-2.5-flash-lite` (covered by the free credit); `gemini-3.5-flash-lite` with `GEMINI_API_KEY` | Any model id from AI Gateway's model list. A model page's *Free AI Gateway Credit* column says whether the free credit covers it; newer models such as `google/gemini-3.5-flash-lite` need paid credit. |
 | `VITE_AUTH_PROVIDERS` | email and password only | Extra sign-in buttons: `google`, `github`, `azure`, `phone` (set them up in Supabase first, see [docs/accounts.md](../../docs/accounts.md)). |
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | `public-settings.json` | Another Supabase project. |
 | `CC_VERCEL_SANDBOX_NAME` | `kairo-runner` | Another named sandbox. |

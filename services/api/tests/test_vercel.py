@@ -21,6 +21,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app.ai.providers import FallbackProvider, choose_provider
 from app.config import ApiSettings
 from app.main import create_app
 from app.queue.runner_client import RunnerBusy
@@ -256,6 +257,183 @@ def test_a_refusal_by_ai_gateway_says_what_to_check_and_logs_the_gateways_reason
 
     spent = gateway_app(make_client, FakeGateway(status=402, error={"error": {"type": "insufficient_funds"}}))
     assert "no credit left" in ask_streamed(spent, {"question": "What is an array?"})[-1]["detail"]
+
+
+# ----------------------------------------------- Gemini API (free key, no card)
+
+GEMINI_CHAT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+
+
+class FakeGemini:
+    """Google's OpenAI-compatible endpoint: streams chat answers and returns JSON answers."""
+
+    def __init__(self, refuse_json_mode: bool = False, bad_key: bool = False) -> None:
+        self.refuse_json_mode = refuse_json_mode
+        self.bad_key = bad_key
+        self.requests: list[dict] = []
+        self.headers: list[httpx.Headers] = []
+
+    @staticmethod
+    def error(message: str) -> httpx.Response:  # Google wraps its errors in a list
+        return httpx.Response(400, json=[{"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": message}}])
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == GEMINI_CHAT
+        body = json.loads(request.content)
+        self.requests.append(body)
+        self.headers.append(request.headers)
+        if self.bad_key:
+            return self.error("API key not valid. Please pass a valid API key.")
+        if body.get("stream"):
+            events = "".join(f"data: {json.dumps({'choices': [{'delta': {'content': p}}]})}\n\n"
+                             for p in ["A loop ", "repeats ", "code."])
+            return httpx.Response(200, content=(events + "data: [DONE]\n\n").encode(),
+                                  headers={"content-type": "text/event-stream"})
+        if self.refuse_json_mode and "response_format" in body:
+            return self.error('Invalid JSON payload received. Unknown name "response_format".')
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(EXPLANATION)}}],
+                                         "usage": {"prompt_tokens": 800, "completion_tokens": 90}})
+
+    @property
+    def transport(self) -> httpx.MockTransport:
+        return httpx.MockTransport(self.handler)
+
+
+def gemini_app(make_client, fake: FakeGemini) -> TestClient:
+    return make_client(gcc_runner(), ai_transport=fake.transport, ai_provider="gemini",
+                       gemini_api_key="test-gemini-key", evidence_secret=SECRET)
+
+
+def test_a_gemini_api_key_alone_turns_saarthi_on(monkeypatch):
+    for name in ("CC_AI_PROVIDER", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("VERCEL", "1")
+    assert ApiSettings().ai_provider == "gateway"
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    assert ApiSettings().ai_provider == "gemini"
+    monkeypatch.setenv("CC_AI_PROVIDER", "gateway")  # an explicit choice still wins
+    assert ApiSettings().ai_provider == "gateway"
+
+
+def test_saarthi_streams_gemini_answers_and_sends_the_key_only_to_google(make_client):
+    fake = FakeGemini()
+    client = gemini_app(make_client, fake)
+    status = client.get("/api/v1/assistant/status").json()
+    assert status["enabled"] is True and status["provider"] == "gemini"
+    assert status["model"] == "gemini-3.5-flash-lite" and "test-gemini-key" not in json.dumps(status)
+    events = ask_streamed(client, {"question": "What is a loop?"})
+    assert [e["text"] for e in events if e["type"] == "delta"] == ["A loop ", "repeats ", "code."]
+    assert events[-1] == {"type": "done", "cached": False}
+    assert fake.headers[0]["authorization"] == "Bearer test-gemini-key"
+    assert fake.requests[0]["model"] == "gemini-3.5-flash-lite" and fake.requests[0]["stream"] is True
+
+
+def test_gemini_explains_a_run_even_when_json_mode_is_refused(make_client):
+    fake = FakeGemini(refuse_json_mode=True)
+    client = gemini_app(make_client, fake)
+    run = run_streamed(client, BROKEN)[-1]
+    answer = client.post("/api/v1/assistant/explain", json={"executionId": run["id"], "sourceHash": sha(BROKEN)})
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["problem"] == EXPLANATION["problem"]
+    assert fake.requests[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in fake.requests[1] and len(fake.requests) == 2
+
+
+def test_a_wrong_gemini_key_is_reported_as_a_rejected_key(make_client):
+    fake = FakeGemini(bad_key=True)
+    client = gemini_app(make_client, fake)
+    events = ask_streamed(client, {"question": "What is a loop?"})
+    assert events[-1]["type"] == "error" and "rejected the server's API key" in events[-1]["detail"]
+    run = run_streamed(client, BROKEN)[-1]
+    failed = client.post("/api/v1/assistant/explain", json={"executionId": run["id"], "sourceHash": sha(BROKEN)})
+    assert failed.status_code == 502 and "rejected the server's API key" in failed.json()["detail"]
+    assert len(fake.requests) == 2  # a bad key is not retried without JSON mode
+
+
+def sse(*pieces: str) -> httpx.Response:
+    events = "".join(f"data: {json.dumps({'choices': [{'delta': {'content': p}}]})}\n\n" for p in pieces)
+    return httpx.Response(200, content=(events + "data: [DONE]\n\n").encode(), headers={"content-type": "text/event-stream"})
+
+
+def two_services(gemini, gateway) -> httpx.MockTransport:
+    """One mock transport for Google's Gemini API and Vercel AI Gateway, told apart by host."""
+    services = {"generativelanguage.googleapis.com": gemini, "ai-gateway.vercel.sh": gateway}
+    return httpx.MockTransport(lambda request: services[request.url.host](request))
+
+
+def test_gemini_and_ai_gateway_back_each_other_up_unless_turned_off():
+    http = None  # never used: choosing a provider sends nothing
+    both = choose_provider(ApiSettings(ai_provider="gemini", gemini_api_key="k", ai_gateway_api_key="g"), http).provider
+    assert isinstance(both, FallbackProvider) and [p.name for p in both.providers] == ["gemini", "gateway"]
+    assert (both.name, both.model) == ("gemini", "gemini-3.5-flash-lite")
+    on_vercel = choose_provider(ApiSettings(ai_provider="gateway", gemini_api_key="k"), http, oidc_token=lambda: "t")
+    assert [p.name for p in on_vercel.provider.providers] == ["gateway", "gemini"]
+    alone = choose_provider(ApiSettings(ai_provider="gemini", gemini_api_key="k", ai_gateway_api_key="g",
+                                        ai_backup=False), http).provider
+    assert not isinstance(alone, FallbackProvider) and alone.name == "gemini"
+    claude = choose_provider(ApiSettings(ai_provider="anthropic", anthropic_api_key="a", gemini_api_key="k"), http)
+    assert claude.provider.name == "anthropic"
+
+
+def test_ai_gateway_answers_when_gemini_is_out_of_free_quota(make_client):
+    to_gateway: list[tuple[str, dict]] = []
+
+    def gemini(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json=[{"error": {"code": 429, "status": "RESOURCE_EXHAUSTED",
+                                                    "message": "You exceeded your current quota."}}])
+
+    def gateway(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        to_gateway.append((request.headers["authorization"], body))
+        if body.get("stream"):
+            return sse("From ", "the gateway.")
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(EXPLANATION)}}]})
+
+    client = make_client(gcc_runner(), ai_transport=two_services(gemini, gateway), ai_provider="gemini",
+                         gemini_api_key="test-gemini-key", ai_gateway_api_key="gw-key", evidence_secret=SECRET)
+    assert client.get("/api/v1/assistant/status").json()["provider"] == "gemini"
+    events = ask_streamed(client, {"question": "What is a loop?"})
+    assert "".join(e["text"] for e in events if e["type"] == "delta") == "From the gateway."
+    run = run_streamed(client, BROKEN)[-1]
+    answer = client.post("/api/v1/assistant/explain", json={"executionId": run["id"], "sourceHash": sha(BROKEN)})
+    assert answer.status_code == 200 and answer.json()["problem"] == EXPLANATION["problem"]
+    assert {auth for auth, _ in to_gateway} == {"Bearer gw-key"}  # each service gets only its own key
+    assert {body["model"] for _, body in to_gateway} == {"google/gemini-2.5-flash-lite"}
+
+
+def test_when_neither_can_answer_students_see_the_first_providers_error(make_client):
+    def gemini(request: httpx.Request) -> httpx.Response:
+        return FakeGemini.error("API key not valid. Please pass a valid API key.")
+
+    def gateway(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"error": {"type": "customer_verification_required", "message": "Add a card."}})
+
+    client = make_client(gcc_runner(), ai_transport=two_services(gemini, gateway), ai_provider="gemini",
+                         gemini_api_key="test-gemini-key", ai_gateway_api_key="gw-key", evidence_secret=SECRET)
+    events = ask_streamed(client, {"question": "What is a loop?"})
+    assert events[-1]["type"] == "error" and "rejected the server's API key" in events[-1]["detail"]
+
+
+class CutOff(httpx.AsyncByteStream):
+    """A streamed answer whose connection breaks after the first piece."""
+
+    async def __aiter__(self):
+        yield b'data: {"choices": [{"delta": {"content": "A loop "}}]}\n\n'
+        raise httpx.ReadError("connection reset")
+
+
+def test_an_answer_cut_off_midway_is_not_restarted_by_the_other_model(make_client):
+    def gemini(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=CutOff(), headers={"content-type": "text/event-stream"})
+
+    def gateway(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("the backup must not be asked to finish another model's answer")
+
+    client = make_client(gcc_runner(), ai_transport=two_services(gemini, gateway), ai_provider="gemini",
+                         gemini_api_key="test-gemini-key", ai_gateway_api_key="gw-key", evidence_secret=SECRET)
+    events = ask_streamed(client, {"question": "What is a loop?"})
+    assert [e["text"] for e in events if e["type"] == "delta"] == ["A loop "]
+    assert events[-1]["type"] == "error"
 
 
 def test_rate_limits_count_the_visitor_address_behind_vercels_proxy(make_client):

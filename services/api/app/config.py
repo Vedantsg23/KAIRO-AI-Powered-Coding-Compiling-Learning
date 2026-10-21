@@ -1,21 +1,23 @@
 """API configuration, read from environment variables prefixed CC_.
 
 The AI provider keys are the exception: they are also read from the
-provider's usual variable (ANTHROPIC_API_KEY, OPENAI_API_KEY). Keys live
-only on the server; no response ever contains them.
+provider's usual variable (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+AI_GATEWAY_API_KEY). Keys live only on the server; no response ever contains them.
 
 On Vercel (the platform sets VERCEL=1) two defaults change, so a deployment
 works without extra settings: code runs in the Vercel Sandbox runner VM
 (runner_backend="vercel-sandbox") and Saarthi uses Vercel AI Gateway
-(ai_provider="gateway"), signed in with the deployment's OIDC token. An
-explicit CC_RUNNER_BACKEND or CC_AI_PROVIDER still wins.
+(ai_provider="gateway"), signed in with the deployment's OIDC token. A
+GEMINI_API_KEY (a free key from Google AI Studio) switches Saarthi to Google's
+Gemini API instead, on Vercel and everywhere else. An explicit
+CC_RUNNER_BACKEND or CC_AI_PROVIDER still wins.
 """
 
 import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -125,10 +127,12 @@ class ApiSettings(BaseSettings):
     # (OpenAI, or a local Ollama / LM Studio server via ai_base_url);
     # "gateway" = Vercel AI Gateway (on Vercel it signs in with the deployment's
     # OIDC token, so no key is stored anywhere; elsewhere set AI_GATEWAY_API_KEY);
+    # "gemini" = Google's Gemini API with GEMINI_API_KEY (free tier, no card);
     # "none" = assistant switched off. Without a key (Anthropic/OpenAI) the
     # assistant reports that it is not configured; everything else works.
-    # Default: "gateway" on Vercel, "anthropic" everywhere else.
-    ai_provider: Literal["anthropic", "openai", "gateway", "none"] = Field(
+    # Default: "gemini" when GEMINI_API_KEY is set, otherwise "gateway" on
+    # Vercel and "anthropic" everywhere else.
+    ai_provider: Literal["anthropic", "openai", "gateway", "gemini", "none"] = Field(
         default_factory=lambda: "gateway" if on_vercel() else "anthropic")
     ai_model: str = ""      # empty = the provider default (see app/ai/providers.py)
     ai_complete_model: str = ""  # model for inline completions; empty = ai_model
@@ -140,6 +144,11 @@ class ApiSettings(BaseSettings):
         default=None, validation_alias=AliasChoices("OPENAI_API_KEY", "openai_api_key"))
     ai_gateway_api_key: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("AI_GATEWAY_API_KEY", "ai_gateway_api_key"))
+    gemini_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("GEMINI_API_KEY", "GOOGLE_API_KEY", "gemini_api_key"))
+    # Gemini and AI Gateway back each other up when both are available (see
+    # app/ai/providers.py: choose_provider). CC_AI_BACKUP=false turns that off.
+    ai_backup: bool = True
     ai_timeout_s: float = 45.0
     ai_max_output_tokens: int = 1500
     # Requests only happen when a student presses a Saarthi button; these
@@ -154,3 +163,11 @@ class ApiSettings(BaseSettings):
     ai_complete_per_minute: int = 30
     ai_complete_per_day: int = 1500
     ai_complete_daily_budget: int = 20000
+
+    @model_validator(mode="after")
+    def _gemini_when_its_key_is_set(self) -> "ApiSettings":
+        """A Gemini API key chooses Gemini, unless CC_AI_PROVIDER names a provider."""
+        key = self.gemini_api_key.get_secret_value().strip() if self.gemini_api_key else ""
+        if key and "ai_provider" not in self.model_fields_set:
+            self.ai_provider = "gemini"
+        return self
