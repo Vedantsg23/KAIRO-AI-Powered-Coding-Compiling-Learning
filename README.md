@@ -18,6 +18,11 @@
 [![Notebook](https://img.shields.io/badge/notebook-Jupyter--style-F37626?style=for-the-badge&logo=jupyter&logoColor=white)](#languages)
 [![Status](https://img.shields.io/badge/milestones-M1_to_M6_done-0b1510?style=for-the-badge)](#roadmap-and-status)
 
+### [▶ Open KAIRO live: kairo-ai-phi.vercel.app](https://kairo-ai-phi.vercel.app)
+
+No install and no sign-up: continue as a guest, or create an account to keep your code, progress and badges on
+every device. Installable as an app on a computer or phone.
+
 [![React](https://img.shields.io/badge/React-18.3-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev)
@@ -29,11 +34,13 @@
 [![Pydantic](https://img.shields.io/badge/Pydantic-2-E92063?style=flat-square&logo=pydantic&logoColor=white)](https://docs.pydantic.dev)
 [![Docker](https://img.shields.io/badge/Docker-11_sandbox_images-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com)
 [![Playwright](https://img.shields.io/badge/Playwright-1.56-2EAD33?style=flat-square&logo=playwright&logoColor=white)](https://playwright.dev)
+[![Gemini](https://img.shields.io/badge/Gemini_API-live_site-8E75B2?style=flat-square&logo=googlegemini&logoColor=white)](docs/saarthi.md)
 [![Claude](https://img.shields.io/badge/Claude_API-optional-D97757?style=flat-square&logo=anthropic&logoColor=white)](https://platform.claude.com)
 [![Ollama](https://img.shields.io/badge/Ollama-local_models-000000?style=flat-square&logo=ollama&logoColor=white)](https://ollama.com)
 [![Supabase](https://img.shields.io/badge/Supabase-accounts_and_saved_work-3FCF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com)
 [![Vercel](https://img.shields.io/badge/Vercel-Functions,_Sandbox,_AI_Gateway-000000?style=flat-square&logo=vercel&logoColor=white)](infra/vercel/README.md)
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?style=flat-square&logo=pwa&logoColor=white)](#highlights)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
 
 <p>
 <a href="#about-the-project"><b>About</b></a> ·
@@ -173,8 +180,8 @@ QUICK FIX; the concept at your cursor is detected too. It never contacts the ser
 **Saarthi, the AI guide**<br>
 Explains a problem from your run's source, diagnostics and output; proposes a minimal patch as a diff; applies it
 only when you press Apply; verifies it with a real run. Its answers stream in word by word in a chat panel like
-Copilot's, with one-tap questions such as "Explain this error". Vercel AI Gateway on the live site; Claude or any
-OpenAI-compatible model such as Ollama elsewhere.
+Copilot's, with one-tap questions such as "Explain this error". On the live site Google's Gemini API answers,
+with Vercel AI Gateway as the backup; elsewhere Claude or any OpenAI-compatible model such as Ollama.
 
 </td>
 </tr>
@@ -942,7 +949,7 @@ it.
 | Language adapters | TOML profiles and grammars | Adding a language is configuration: commands, limits, error rules |
 | Runner | FastAPI service using the [Docker SDK for Python](https://docker-py.readthedocs.io) 7.2 | The only component with Docker access; NDJSON progress events |
 | Sandboxes | Docker, 11 images built `FROM ubuntu:24.04`, tini | Real toolchains (and the formatters clang-format 18, Black, gofmt, shfmt) in hardened, throwaway containers |
-| AI | [Claude API](https://platform.claude.com) (default model `claude-haiku-4-5-20251001`) or any OpenAI-compatible server such as [Ollama](https://ollama.com) | Replaceable; keys stay on the server |
+| AI | Live site: [Google Gemini API](https://ai.google.dev) (`gemini-3.5-flash-lite`, free key) with [Vercel AI Gateway](https://vercel.com/ai-gateway) as the backup. Elsewhere: [Claude API](https://platform.claude.com) (default model `claude-haiku-4-5-20251001`) or any OpenAI-compatible server such as [Ollama](https://ollama.com) | Replaceable; keys stay on the server |
 | Accounts (optional) | [Supabase](https://supabase.com) Auth via `@supabase/supabase-js` | Google, GitHub, Microsoft, phone and email sign-in when configured |
 | Tests | [pytest](https://pytest.org), [Vitest](https://vitest.dev), [Playwright](https://playwright.dev) 1.56 | Unit, golden, end-to-end language and browser tests |
 | Quality | [Ruff](https://docs.astral.sh/ruff/), `tsc`, `npm audit` | Lint, type-check, dependency audit |
@@ -1201,11 +1208,11 @@ timeline
 | M2 Vertical slice for C | Done: [report](docs/milestones/M2-report.md) |
 | M3 C++, Java, Python, and eleven more languages | Done (Swift prepared, unverified): [report](docs/milestones/M3-M6-report.md) |
 | M4 Checking while typing | Done |
-| M5 Saarthi explanations grounded in evidence | Done (tested with a stand-in provider; a real key not yet tried) |
+| M5 Saarthi explanations grounded in evidence | Done (tested with a stand-in provider, and on the live site with Gemini and AI Gateway) |
 | M6 Reviewable fixes and automatic re-verification | Done |
 | UI: the KAIRO console, boot sequence, Saarthi avatar, command palette, interactive entry page, badges | Done |
 | 17 more languages, HTML/CSS/React preview, Python notebook, extensions and formatters, AI autocomplete, sign-in options | Done |
-| Live site on Vercel without Docker: Vercel Sandbox runner, AI Gateway, Supabase accounts with saved code, progress, badges and settings, daily keep-alive, streamed Saarthi chat, VS Code-style workspace, installable app | Done: [infra/vercel/README.md](infra/vercel/README.md) |
+| Live site on Vercel without Docker ([kairo-ai-phi.vercel.app](https://kairo-ai-phi.vercel.app)): Vercel Sandbox runner, Saarthi on the Gemini API with AI Gateway as the backup, Supabase accounts with saved code, progress, badges and settings, daily keep-alive, streamed Saarthi chat, VS Code-style workspace, installable app | Done: [infra/vercel/README.md](infra/vercel/README.md) |
 | M7 Evaluation | Next |
 
 **M7** is an evaluation with students (task completion, time to fix an error, usefulness of explanations), and
@@ -1254,7 +1261,7 @@ Department of Computer Engineering, DYPCOEI Varale, 2026-27, Group 04.
 
 ## License
 
-This repository has no license file: all rights are reserved by the authors.
+KAIRO is released under the [MIT License](LICENSE). Copyright (c) 2026 Vedant Gadage.
 
 ## Acknowledgements
 
