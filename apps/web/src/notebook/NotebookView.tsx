@@ -1004,7 +1004,11 @@ function NotebookTerminal({
   const [history, setHistory] = useState<string[]>([]);
   const [cursor, setCursor] = useState<number | null>(null);
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [log]);
+  // A block body: newer browsers return a Promise from scrollIntoView, and an effect must
+  // return nothing or a clean-up function (React calls whatever it returns on the next run).
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [log]);
   const submit = () => {
     const text = line.trim();
     if (!text || busy) return;
